@@ -123,3 +123,66 @@ def test_delete_session_clears_history(fake_embeddings, fake_llm):
     assert r.status_code == 200
     assert r.json() == {"session_id": "s-del", "cleared": True}
     assert store.get_history("s-del") == []
+
+
+def test_stream_llm_error_yields_error_sse_event(fake_embeddings, fake_llm):
+    from google.genai.errors import ClientError
+
+    upload()
+    fake_llm.error = ClientError(503, {"error": {"code": 503, "message": "key AIzaSECRET"}})
+
+    r = client.post(
+        "/chat/stream",
+        json={
+            "session_id": "s-err",
+            "question": "how do plants turn sunlight into energy",
+        },
+    )
+    assert r.status_code == 200
+    events = parse_sse(r.text)
+    error_events = [e for e in events if e["type"] == "error"]
+    assert len(error_events) == 1
+    assert error_events[0]["status_code"] == 503
+    assert "AIza" not in error_events[0]["detail"]
+    assert error_events[0]["detail"]
+
+
+def test_stream_fallback_on_503_succeeds(fake_embeddings, monkeypatch, caplog):
+    from google.genai.errors import ClientError
+    from langchain_core.messages import AIMessage
+    from app.rag import chain
+
+    upload()
+    models_called: list[str] = []
+
+    class StreamConditionalLLM:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def stream(self, messages: list):
+            models_called.append(self.model_name)
+            if self.model_name == "gemini-3.8-flash":
+                raise ClientError(503, {"error": {"code": 503, "status": "UNAVAILABLE"}})
+            yield AIMessage(
+                content="Fallback stream [notes.txt, p.1].",
+                usage_metadata={"input_tokens": 30, "output_tokens": 5, "total_tokens": 35},
+            )
+
+    monkeypatch.setattr(
+        chain, "get_llm", lambda model=None: StreamConditionalLLM(model or "gemini-3.8-flash")
+    )
+
+    r = client.post(
+        "/chat/stream",
+        json={
+            "session_id": "s-fallback",
+            "question": "how do plants turn sunlight into energy",
+        },
+    )
+    assert r.status_code == 200
+    events = parse_sse(r.text)
+    tokens = [e["content"] for e in events if e["type"] == "token"]
+    assert "".join(tokens) == "Fallback stream [notes.txt, p.1]."
+    assert models_called == ["gemini-3.8-flash", "gemini-2.5-flash"]
+    assert any("gemini-2.5-flash" in rec.message for rec in caplog.records)
+

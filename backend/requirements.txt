@@ -13,3 +13,5 @@ langchain-chroma
 rank-bm25
 pytest
 httpx
+supabase
+pyjwt

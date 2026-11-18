@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     # --- RAG chain (phase 4) ---
     # Stable Gemini text model from the Gemini API models page (ai.google.dev).
     llm_model: str = "gemini-3.8-flash"
+    llm_fallback_models: list[str] = ["gemini-2.5-flash"]
     llm_temperature: float = 0.2
     top_k: int = 5  # chunks sent to the LLM as context
     # Cosine distance cutoff for the relevance gate (0 = identical, larger = less
@@ -36,6 +37,12 @@ class Settings(BaseSettings):
 
     # --- Conversation memory (phase 5) ---
     memory_max_turns: int = 5  # user/assistant message pairs kept per session
+
+    # --- Auth & Supabase (phase 7) ---
+    supabase_url: str = ""
+    supabase_key: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
 
 
 @lru_cache

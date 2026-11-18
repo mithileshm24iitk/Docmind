@@ -56,18 +56,34 @@ class LLMError(Exception):
 
 
 @lru_cache
-def get_llm() -> BaseChatModel:
-    """Return the Gemini chat model (typed generically so tests can use a fake)."""
+def _get_llm_for_model(model: str) -> BaseChatModel:
+    """Return a cached Gemini chat model for the given model name."""
     settings = get_settings()
     if not settings.google_api_key:
         raise LLMError(503, "The AI service is not configured (missing API key).")
     return ChatGoogleGenerativeAI(
-        model=settings.llm_model,
+        model=model,
         temperature=settings.llm_temperature,
         google_api_key=settings.google_api_key,
         timeout=LLM_TIMEOUT_S,
         max_retries=2,
     )
+
+
+def get_llm(model: str | None = None) -> BaseChatModel:
+    """Return the Gemini chat model (typed generically so tests can use a fake)."""
+    settings = get_settings()
+    return _get_llm_for_model(model or settings.llm_model)
+
+
+def _candidate_models() -> list[str]:
+    """Return primary llm_model followed by any configured fallback models."""
+    settings = get_settings()
+    models = [settings.llm_model]
+    for fallback in settings.llm_fallback_models:
+        if fallback and fallback not in models:
+            models.append(fallback)
+    return models
 
 
 # ---------- small helpers ----------
@@ -133,6 +149,31 @@ def _is_timeout(exc: BaseException) -> bool:
     return False
 
 
+def _is_unavailable_or_timeout(exc: BaseException) -> bool:
+    """True when an LLM call failed due to 503 / UNAVAILABLE / timeout."""
+    if _is_timeout(exc):
+        return True
+    if _status_code(exc) == 503:
+        return True
+    seen: BaseException | None = exc
+    while seen is not None:
+        status = getattr(seen, "status", None)
+        if isinstance(status, str) and "UNAVAILABLE" in status.upper():
+            return True
+        if "UNAVAILABLE" in type(seen).__name__.upper() or "503" in str(seen):
+            return True
+        seen = seen.__cause__ or seen.__context__
+    return False
+
+
+def _call_get_llm(model: str) -> BaseChatModel:
+    """Call get_llm(model), falling back to get_llm() if a test monkeypatched a 0-arg lambda."""
+    try:
+        return get_llm(model)
+    except TypeError:
+        return get_llm()
+
+
 def to_llm_error(exc: Exception) -> LLMError:
     """Map any LLM exception to a fixed, safe message. Never echoes str(exc)."""
     if isinstance(exc, LLMError):
@@ -140,6 +181,8 @@ def to_llm_error(exc: Exception) -> LLMError:
     code = _status_code(exc)
     if _is_timeout(exc):
         return LLMError(504, "The AI service timed out. Please try again.")
+    if code == 503 or _is_unavailable_or_timeout(exc):
+        return LLMError(503, "The AI service is temporarily unavailable. Please try again.")
     if code == 429:
         return LLMError(429, "The AI service quota or rate limit was reached. Try again later.")
     if code in (401, 403):
@@ -154,33 +197,65 @@ def _ms_since(start: float) -> float:
 
 
 def _generate(messages: list) -> tuple[str, dict | None]:
-    """Call the LLM; return (answer text, usage metadata or None)."""
-    try:
-        response = get_llm().invoke(messages)
-    except Exception as exc:  # noqa: BLE001 - every failure becomes a clean LLMError
-        error = to_llm_error(exc)
-        # Log only the type and status, never the message (it could echo request data).
-        logger.warning(
-            "LLM call failed: %s -> HTTP %s", type(exc).__name__, error.status_code
-        )
-        raise error from None
-    return response.text, getattr(response, "usage_metadata", None)
+    """Call the LLM; retry on 503/UNAVAILABLE/timeout with fallback models."""
+    models = _candidate_models()
+    last_exc: Exception | None = None
+    for idx, model in enumerate(models):
+        try:
+            response = _call_get_llm(model).invoke(messages)
+            if idx > 0:
+                logger.warning("LLM fallback succeeded using model=%s", model)
+            return response.text, getattr(response, "usage_metadata", None)
+        except Exception as exc:  # noqa: BLE001 - every failure becomes a clean LLMError
+            last_exc = exc
+            if idx + 1 < len(models) and _is_unavailable_or_timeout(exc):
+                next_model = models[idx + 1]
+                logger.warning(
+                    "LLM model %s failed (%s); retrying with fallback model %s",
+                    model,
+                    type(exc).__name__,
+                    next_model,
+                )
+                continue
+            error = to_llm_error(exc)
+            # Log only the type and status, never the message (it could echo request data).
+            logger.warning(
+                "LLM call failed: %s -> HTTP %s", type(exc).__name__, error.status_code
+            )
+            raise error from None
+    raise to_llm_error(last_exc or RuntimeError("No LLM models configured"))
 
 
 def _stream_generate(messages: list) -> Iterator[tuple[str, dict | None]]:
-    """Stream (token_text, usage_metadata) pairs from the LLM."""
-    try:
-        for chunk in get_llm().stream(messages):
-            token = chunk.text if hasattr(chunk, "text") else str(chunk.content)
-            usage = getattr(chunk, "usage_metadata", None)
-            if token or usage:
-                yield token, usage
-    except Exception as exc:  # noqa: BLE001 - every failure becomes a clean LLMError
-        error = to_llm_error(exc)
-        logger.warning(
-            "LLM stream failed: %s -> HTTP %s", type(exc).__name__, error.status_code
-        )
-        raise error from None
+    """Stream (token_text, usage_metadata) pairs from the LLM, with fallback on 503/timeout."""
+    models = _candidate_models()
+    for idx, model in enumerate(models):
+        yielded_any = False
+        try:
+            for chunk in _call_get_llm(model).stream(messages):
+                token = chunk.text if hasattr(chunk, "text") else str(chunk.content)
+                usage = getattr(chunk, "usage_metadata", None)
+                if token or usage:
+                    if not yielded_any and idx > 0:
+                        logger.warning("LLM stream fallback succeeded using model=%s", model)
+                    yielded_any = True
+                    yield token, usage
+            return
+        except Exception as exc:  # noqa: BLE001 - every failure becomes a clean LLMError
+            if not yielded_any and idx + 1 < len(models) and _is_unavailable_or_timeout(exc):
+                next_model = models[idx + 1]
+                logger.warning(
+                    "LLM stream model %s failed (%s); retrying with fallback model %s",
+                    model,
+                    type(exc).__name__,
+                    next_model,
+                )
+                continue
+            error = to_llm_error(exc)
+            logger.warning(
+                "LLM stream failed: %s -> HTTP %s", type(exc).__name__, error.status_code
+            )
+            raise error from None
 
 
 def _sse(payload: dict) -> str:
@@ -278,64 +353,74 @@ def stream_answer(
     k = k or settings.top_k
     store = get_memory_store()
     history = store.get_history(session_id) if session_id else []
-    rewritten = rewrite_question(question, history)
 
-    stats: dict = {
-        "retrieval_ms": None,
-        "generation_ms": None,
-        "input_tokens": None,
-        "output_tokens": None,
-    }
+    try:
+        rewritten = rewrite_question(question, history)
 
-    start = time.perf_counter()
-    distance = best_distance(collection, rewritten)
-    passed_gate = distance is not None and distance <= settings.relevance_max_distance
-    chunks = hybrid_search(collection, rewritten, k) if passed_gate else []
-    stats["retrieval_ms"] = _ms_since(start)
+        stats: dict = {
+            "retrieval_ms": None,
+            "generation_ms": None,
+            "input_tokens": None,
+            "output_tokens": None,
+        }
 
-    if not chunks:
+        start = time.perf_counter()
+        distance = best_distance(collection, rewritten)
+        passed_gate = distance is not None and distance <= settings.relevance_max_distance
+        chunks = hybrid_search(collection, rewritten, k) if passed_gate else []
+        stats["retrieval_ms"] = _ms_since(start)
+
+        if not chunks:
+            if session_id:
+                store.add_turn(session_id, question, NOT_FOUND_ANSWER)
+            logger.info("RAG stream gate blocked: best_distance=%s stats=%s", distance, stats)
+            yield _sse({"type": "token", "content": NOT_FOUND_ANSWER})
+            yield _sse(
+                {
+                    "type": "done",
+                    "sources": [],
+                    "best_distance": distance,
+                    "grounded": False,
+                    "rewritten_question": rewritten,
+                    "stats": stats,
+                }
+            )
+            return
+
+        start = time.perf_counter()
+        collected: list[str] = []
+        usage: dict | None = None
+        for token, chunk_usage in _stream_generate(build_messages(question, chunks, history)):
+            if chunk_usage:
+                usage = chunk_usage
+            if token:
+                collected.append(token)
+                yield _sse({"type": "token", "content": token})
+        stats["generation_ms"] = _ms_since(start)
+        if usage:
+            stats["input_tokens"] = usage.get("input_tokens")
+            stats["output_tokens"] = usage.get("output_tokens")
+
+        full_answer = "".join(collected)
         if session_id:
-            store.add_turn(session_id, question, NOT_FOUND_ANSWER)
-        logger.info("RAG stream gate blocked: best_distance=%s stats=%s", distance, stats)
-        yield _sse({"type": "token", "content": NOT_FOUND_ANSWER})
+            store.add_turn(session_id, question, full_answer)
+
+        logger.info("RAG stream answered: best_distance=%.3f stats=%s", distance, stats)
         yield _sse(
             {
                 "type": "done",
-                "sources": [],
+                "sources": to_sources(chunks),
                 "best_distance": distance,
-                "grounded": False,
+                "grounded": True,
                 "rewritten_question": rewritten,
                 "stats": stats,
             }
         )
-        return
-
-    start = time.perf_counter()
-    collected: list[str] = []
-    usage: dict | None = None
-    for token, chunk_usage in _stream_generate(build_messages(question, chunks, history)):
-        if chunk_usage:
-            usage = chunk_usage
-        if token:
-            collected.append(token)
-            yield _sse({"type": "token", "content": token})
-    stats["generation_ms"] = _ms_since(start)
-    if usage:
-        stats["input_tokens"] = usage.get("input_tokens")
-        stats["output_tokens"] = usage.get("output_tokens")
-
-    full_answer = "".join(collected)
-    if session_id:
-        store.add_turn(session_id, question, full_answer)
-
-    logger.info("RAG stream answered: best_distance=%.3f stats=%s", distance, stats)
-    yield _sse(
-        {
-            "type": "done",
-            "sources": to_sources(chunks),
-            "best_distance": distance,
-            "grounded": True,
-            "rewritten_question": rewritten,
-            "stats": stats,
-        }
-    )
+    except LLMError as err:
+        yield _sse(
+            {
+                "type": "error",
+                "detail": str(err),
+                "status_code": err.status_code,
+            }
+        )

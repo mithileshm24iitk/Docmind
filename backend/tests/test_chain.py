@@ -140,3 +140,31 @@ def test_missing_api_key_is_clean_error(fake_embeddings):
     with pytest.raises(LLMError) as info:
         answer(GROUNDED_Q)
     assert info.value.status_code == 503
+
+
+def test_fallback_model_used_on_503(fake_embeddings, monkeypatch, caplog):
+    add_corpus()
+    models_called: list[str] = []
+
+    class ConditionalLLM:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+
+        def invoke(self, messages: list):
+            models_called.append(self.model_name)
+            if self.model_name == "gemini-3.8-flash":
+                raise ClientError(503, {"error": {"code": 503, "status": "UNAVAILABLE"}})
+            from langchain_core.messages import AIMessage
+
+            return AIMessage(
+                content="Fallback answer [biology.pdf, p.2].",
+                usage_metadata={"input_tokens": 50, "output_tokens": 10, "total_tokens": 60},
+            )
+
+    monkeypatch.setattr(chain, "get_llm", lambda model=None: ConditionalLLM(model or "gemini-3.8-flash"))
+
+    result = answer(GROUNDED_Q)
+    assert result["answer"] == "Fallback answer [biology.pdf, p.2]."
+    assert models_called == ["gemini-3.8-flash", "gemini-2.5-flash"]
+    assert any("gemini-2.5-flash" in r.message for r in caplog.records)
+

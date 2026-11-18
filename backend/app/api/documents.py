@@ -2,10 +2,11 @@ import tempfile
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from langchain_core.documents import Document
 from pydantic import BaseModel, Field
 
+from app.api.auth import get_current_user
 from app.config import get_settings
 from app.ingestion.chunking import chunk_documents
 from app.ingestion.loaders import LOADERS, load_document
@@ -14,7 +15,11 @@ from app.retrieval.bm25 import bm25_search
 from app.retrieval.hybrid import hybrid_search
 from app.retrieval.vectorstore import DEFAULT_COLLECTION
 
-router = APIRouter(prefix="/documents", tags=["documents"])
+router = APIRouter(
+    prefix="/documents",
+    tags=["documents"],
+    dependencies=[Depends(get_current_user)],
+)
 
 MAX_MB = 20
 

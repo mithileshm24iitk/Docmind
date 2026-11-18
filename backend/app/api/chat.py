@@ -1,13 +1,18 @@
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, StringConstraints
 
+from app.api.auth import get_current_user
 from app.rag.chain import LLMError, answer, stream_answer
-from app.rag.memory import get_memory_store
+from app.rag.memory import get_memory_store, set_current_user_id
 
-router = APIRouter(prefix="/chat", tags=["chat"])
+router = APIRouter(
+    prefix="/chat",
+    tags=["chat"],
+    dependencies=[Depends(get_current_user)],
+)
 
 MAX_QUESTION_CHARS = 2000
 MAX_SESSION_ID_CHARS = 128
@@ -36,8 +41,12 @@ class StreamRequest(BaseModel):
 
 
 @router.post("/ask")
-def ask(req: AskRequest) -> dict:
+def ask(
+    req: AskRequest,
+    user: dict[str, str] = Depends(get_current_user),
+) -> dict:
     """Answer a question from the uploaded documents, with citations and sources."""
+    set_current_user_id(user["id"])
     try:
         return answer(req.question, session_id=req.session_id, k=req.k)
     except LLMError as e:
@@ -45,16 +54,28 @@ def ask(req: AskRequest) -> dict:
 
 
 @router.post("/stream")
-def stream(req: StreamRequest) -> StreamingResponse:
+def stream(
+    req: StreamRequest,
+    user: dict[str, str] = Depends(get_current_user),
+) -> StreamingResponse:
     """Stream an answer as Server-Sent Events (token chunks + final done event)."""
+
+    def _event_stream():
+        set_current_user_id(user["id"])
+        yield from stream_answer(req.question, session_id=req.session_id, k=req.k)
+
     return StreamingResponse(
-        stream_answer(req.question, session_id=req.session_id, k=req.k),
+        _event_stream(),
         media_type="text/event-stream",
     )
 
 
 @router.delete("/sessions/{session_id}")
-def clear_session(session_id: str) -> dict:
+def clear_session(
+    session_id: str,
+    user: dict[str, str] = Depends(get_current_user),
+) -> dict:
     """Clear conversation memory for a session."""
-    get_memory_store().clear(session_id)
+    set_current_user_id(user["id"])
+    get_memory_store().clear(session_id, user_id=user["id"])
     return {"session_id": session_id, "cleared": True}

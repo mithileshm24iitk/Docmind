@@ -1,15 +1,142 @@
-"""Shared test setup: temp Chroma dir, no real API key, fake embeddings and LLM."""
+"""Shared test setup: temp Chroma dir, no real API keys, fake embeddings, LLM, and Supabase."""
 
+from datetime import datetime, timezone
 import hashlib
 import math
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from langchain_core.embeddings import Embeddings
 from langchain_core.messages import AIMessage
 
+from app import db
+from app.api.auth import get_current_user
 from app.config import get_settings
+from app.main import app
 from app.rag import chain, memory
 from app.retrieval import bm25, vectorstore
+
+
+class FakeSupabaseTable:
+    """In-memory stand-in for a Supabase PostgREST table query builder."""
+
+    def __init__(self, client: "FakeSupabaseClient", table_name: str) -> None:
+        self._client = client
+        self._table_name = table_name
+        self._op: str = "select"
+        self._payload: Any = None
+        self._filters: list[tuple[str, Any]] = []
+        self._order_col: str | None = None
+        self._order_desc: bool = False
+        self._limit_count: int | None = None
+
+    @property
+    def _rows(self) -> list[dict[str, Any]]:
+        return self._client.tables.setdefault(self._table_name, [])
+
+    def select(self, _columns: str = "*") -> "FakeSupabaseTable":
+        self._op = "select"
+        return self
+
+    def insert(self, payload: dict[str, Any] | list[dict[str, Any]]) -> "FakeSupabaseTable":
+        self._op = "insert"
+        self._payload = payload
+        return self
+
+    def upsert(self, payload: dict[str, Any] | list[dict[str, Any]]) -> "FakeSupabaseTable":
+        self._op = "upsert"
+        self._payload = payload
+        return self
+
+    def delete(self) -> "FakeSupabaseTable":
+        self._op = "delete"
+        return self
+
+    def eq(self, column: str, value: Any) -> "FakeSupabaseTable":
+        self._filters.append((column, value))
+        return self
+
+    def order(self, column: str, *, desc: bool = False) -> "FakeSupabaseTable":
+        self._order_col = column
+        self._order_desc = desc
+        return self
+
+    def limit(self, count: int) -> "FakeSupabaseTable":
+        self._limit_count = count
+        return self
+
+    def _matches(self, row: dict[str, Any]) -> bool:
+        return all(row.get(col) == val for col, val in self._filters)
+
+    def execute(self) -> SimpleNamespace:
+        rows = self._rows
+
+        if self._op == "insert":
+            items = self._payload if isinstance(self._payload, list) else [self._payload]
+            inserted: list[dict[str, Any]] = []
+            for item in items:
+                record = dict(item)
+                record.setdefault("id", self._client.next_id())
+                record.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+                rows.append(record)
+                inserted.append(dict(record))
+            return SimpleNamespace(data=inserted)
+
+        if self._op == "upsert":
+            items = self._payload if isinstance(self._payload, list) else [self._payload]
+            upserted: list[dict[str, Any]] = []
+            for item in items:
+                record = dict(item)
+                key_id = record.get("id")
+                existing = next((r for r in rows if key_id is not None and r.get("id") == key_id), None)
+                if existing is not None:
+                    existing.update(record)
+                    upserted.append(dict(existing))
+                else:
+                    record.setdefault("id", self._client.next_id())
+                    record.setdefault("created_at", datetime.now(timezone.utc).isoformat())
+                    rows.append(record)
+                    upserted.append(dict(record))
+            return SimpleNamespace(data=upserted)
+
+        if self._op == "delete":
+            kept: list[dict[str, Any]] = []
+            deleted: list[dict[str, Any]] = []
+            for row in rows:
+                if self._matches(row):
+                    deleted.append(dict(row))
+                else:
+                    kept.append(row)
+            self._client.tables[self._table_name] = kept
+            return SimpleNamespace(data=deleted)
+
+        # Default: select
+        matched = [dict(row) for row in rows if self._matches(row)]
+        if self._order_col:
+            matched.sort(key=lambda r: r.get(self._order_col, ""), reverse=self._order_desc)
+        if self._limit_count is not None:
+            matched = matched[: self._limit_count]
+        return SimpleNamespace(data=matched)
+
+
+class FakeSupabaseClient:
+    """In-memory mock of `supabase.Client` for offline testing."""
+
+    def __init__(self) -> None:
+        self.tables: dict[str, list[dict[str, Any]]] = {}
+        self._counter = 0
+
+    def next_id(self) -> int:
+        self._counter += 1
+        return self._counter
+
+    def table(self, name: str) -> FakeSupabaseTable:
+        return FakeSupabaseTable(self, name)
+
+    def reset(self) -> None:
+        self.tables.clear()
+        self._counter = 0
 
 
 class FakeEmbeddings(Embeddings):
@@ -37,18 +164,40 @@ class FakeEmbeddings(Embeddings):
         return self._embed(text)
 
 
+@pytest.fixture
+def fake_supabase() -> FakeSupabaseClient:
+    """Return the active in-memory FakeSupabaseClient."""
+    return db.get_supabase()  # type: ignore[return-value]
+
+
 @pytest.fixture(autouse=True)
 def isolated_settings(tmp_path, monkeypatch):
-    """Point Chroma at a temp folder and blank the API key (env beats .env).
-
-    Also empty the in-memory BM25 cache, since every test gets a fresh Chroma dir.
-    """
+    """Point Chroma at a temp folder, blank secrets, and mock Supabase offline."""
     monkeypatch.setenv("CHROMA_DIR", str(tmp_path / "chroma"))
     monkeypatch.setenv("GOOGLE_API_KEY", "")
+    monkeypatch.setenv("LLM_MODEL", "gemini-3.8-flash")
+    monkeypatch.setenv("SUPABASE_URL", "")
+    monkeypatch.setenv("SUPABASE_KEY", "")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "")
+
+    mock_sb = FakeSupabaseClient()
+    monkeypatch.setattr(db, "get_supabase_client", lambda: mock_sb)
+    monkeypatch.setattr(db, "get_supabase", lambda: mock_sb)
+
+    def _fake_current_user() -> dict[str, str]:
+        user = {"id": "test-user", "email": "test@example.com", "name": "Test User"}
+        memory.set_current_user_id(user["id"])
+        return user
+
+    app.dependency_overrides[get_current_user] = _fake_current_user
+    memory.set_current_user_id("test-user")
+
     get_settings.cache_clear()
     bm25.clear_cache()
     memory.get_memory_store().clear_all()
     yield
+    app.dependency_overrides.clear()
     get_settings.cache_clear()
     bm25.clear_cache()
     memory.get_memory_store().clear_all()
