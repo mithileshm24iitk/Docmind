@@ -84,15 +84,15 @@ def test_tracing_writes_valid_jsonl_entries(tmp_path: Path, fake_embeddings, fak
     )
 
     # 1. Grounded answer() call
-    res = answer("how does photosynthesis turn sunlight into energy", session_id="s-trace-1")
+    res = answer("how does photosynthesis turn sunlight into energy", session_id="s-trace-1", user_id="u1")
     assert res["grounded"] is True
 
     # 2. Un-grounded answer() call (blocked by relevance gate)
-    res_blocked = answer("quantum chromodynamics gluon confinement", session_id="s-trace-2")
+    res_blocked = answer("quantum chromodynamics gluon confinement", session_id="s-trace-2", user_id="u1")
     assert res_blocked["grounded"] is False
 
     # 3. Streaming stream_answer() call
-    list(stream_answer("how does photosynthesis turn sunlight into energy", session_id="s-trace-3"))
+    list(stream_answer("how does photosynthesis turn sunlight into energy", session_id="s-trace-3", user_id="u1"))
 
     lines = trace_file.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 3

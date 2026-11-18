@@ -1,7 +1,13 @@
-"""Session conversation memory store backed by the Supabase `chat_messages` table."""
+"""Session conversation memory store backed by the Supabase `chat_messages` table.
+
+Every read and write takes the authenticated user's id explicitly. There is no
+"current user" global or "anonymous" default: /chat/stream runs its generator
+in worker threads, and each step gets a fresh copy of the request context, so a
+context variable set inside it was lost and turns were saved as "anonymous"
+(a foreign-key violation on chat_messages.user_id).
+"""
 
 from abc import ABC, abstractmethod
-from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,25 +16,19 @@ from app.config import get_settings
 
 Turn = dict[str, str]
 
-DEFAULT_USER_ID = "anonymous"
-_current_user_id: ContextVar[str] = ContextVar("current_user_id", default=DEFAULT_USER_ID)
 
-
-def set_current_user_id(user_id: str) -> None:
-    """Set the authenticated user's ID for the active request context."""
-    _current_user_id.set(user_id or DEFAULT_USER_ID)
-
-
-def get_current_user_id() -> str:
-    """Return the authenticated user's ID for the active request context."""
-    return _current_user_id.get()
+def _require_user_id(user_id: str) -> str:
+    """Refuse to touch chat_messages without a real user id."""
+    if not user_id:
+        raise ValueError("user_id is required for chat memory")
+    return user_id
 
 
 class BaseMemoryStore(ABC):
     """Interface for storing per-session user/assistant turns."""
 
     @abstractmethod
-    def get_history(self, session_id: str, user_id: str | None = None) -> list[Turn]:
+    def get_history(self, session_id: str, *, user_id: str) -> list[Turn]:
         """Return stored turns for a session, oldest first."""
 
     @abstractmethod
@@ -37,12 +37,13 @@ class BaseMemoryStore(ABC):
         session_id: str,
         user_msg: str,
         assistant_msg: str,
-        user_id: str | None = None,
+        *,
+        user_id: str,
     ) -> None:
         """Append one (user, assistant) turn and truncate to the max turn limit."""
 
     @abstractmethod
-    def clear(self, session_id: str, user_id: str | None = None) -> None:
+    def clear(self, session_id: str, *, user_id: str) -> None:
         """Delete all turns for a session."""
 
 
@@ -51,15 +52,9 @@ class SupabaseSessionStore(BaseMemoryStore):
 
     TABLE = "chat_messages"
 
-    def __init__(
-        self,
-        client: Any | None = None,
-        max_turns: int | None = None,
-        user_id: str | None = None,
-    ) -> None:
+    def __init__(self, client: Any | None = None, max_turns: int | None = None) -> None:
         self._client = client
         self._max_turns = max_turns
-        self._user_id = user_id
 
     def _db(self) -> Any:
         if self._client is not None:
@@ -71,16 +66,13 @@ class SupabaseSessionStore(BaseMemoryStore):
             return self._max_turns
         return get_settings().memory_max_turns
 
-    def _resolve_user_id(self, user_id: str | None = None) -> str:
-        return user_id or self._user_id or get_current_user_id()
-
-    def get_history(self, session_id: str, user_id: str | None = None) -> list[Turn]:
+    def get_history(self, session_id: str, *, user_id: str) -> list[Turn]:
         """Fetch conversation turns for (user_id, session_id), oldest first."""
         limit = self._limit()
         if limit <= 0:
             return []
 
-        uid = self._resolve_user_id(user_id)
+        uid = _require_user_id(user_id)
         response = (
             self._db()
             .table(self.TABLE)
@@ -105,10 +97,11 @@ class SupabaseSessionStore(BaseMemoryStore):
         session_id: str,
         user_msg: str,
         assistant_msg: str,
-        user_id: str | None = None,
+        *,
+        user_id: str,
     ) -> None:
         """Insert a turn into `chat_messages` for the authenticated user and prune old turns."""
-        uid = self._resolve_user_id(user_id)
+        uid = _require_user_id(user_id)
         limit = self._limit()
         if limit <= 0:
             self.clear(session_id, user_id=uid)
@@ -141,9 +134,9 @@ class SupabaseSessionStore(BaseMemoryStore):
                 if row_id is not None:
                     client.table(self.TABLE).delete().eq("id", row_id).execute()
 
-    def clear(self, session_id: str, user_id: str | None = None) -> None:
+    def clear(self, session_id: str, *, user_id: str) -> None:
         """Delete all turns for (user_id, session_id) from `chat_messages`."""
-        uid = self._resolve_user_id(user_id)
+        uid = _require_user_id(user_id)
         (
             self._db()
             .table(self.TABLE)

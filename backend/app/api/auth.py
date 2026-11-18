@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 
 from app import db
 from app.config import get_settings
-from app.rag.memory import set_current_user_id
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -80,13 +79,11 @@ def verify_access_token(token: str) -> dict[str, str]:
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> dict[str, str]:
-    """FastAPI dependency that validates the Bearer token and sets the active user ID."""
+    """FastAPI dependency: validate the Bearer token (401 if missing/invalid) and return the user."""
     if credentials is None or credentials.scheme.lower() != "bearer" or not credentials.credentials:
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
-    user = verify_access_token(credentials.credentials)
-    set_current_user_id(user["id"])
-    return user
+    return verify_access_token(credentials.credentials)
 
 
 def _build_google_auth_url(redirect_uri: str) -> str:

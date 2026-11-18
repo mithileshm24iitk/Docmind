@@ -17,6 +17,9 @@ from app.main import app
 from app.rag import chain, memory, tracing
 from app.retrieval import bm25, vectorstore
 
+# The user id the fake login (dependency override) returns.
+TEST_USER_ID = "test-user"
+
 # Fake 48-char signing key for tests only (never a real secret).
 TEST_AUTH_SECRET = "test-auth-secret-not-real-0123456789abcdefghijkl"
 
@@ -193,12 +196,9 @@ def isolated_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "get_supabase", lambda: mock_sb)
 
     def _fake_current_user() -> dict[str, str]:
-        user = {"id": "test-user", "email": "test@example.com", "name": "Test User"}
-        memory.set_current_user_id(user["id"])
-        return user
+        return {"id": TEST_USER_ID, "email": "test@example.com", "name": "Test User"}
 
     app.dependency_overrides[get_current_user] = _fake_current_user
-    memory.set_current_user_id("test-user")
 
     get_settings.cache_clear()
     bm25.clear_cache()

@@ -1,6 +1,6 @@
 """RAG chain: retrieve chunks, check relevance, ask Gemini, return or stream answer + sources.
 
-Flow for answer(question, session_id) / stream_answer(question, session_id):
+Flow for answer(question, session_id, user_id) / stream_answer(question, session_id, user_id):
   1. If session_id has history, condense the follow-up question into a standalone
      search query (skipped when history is empty).
   2. Relevance gate: one vector search for the single closest chunk to the search
@@ -261,6 +261,31 @@ def _stream_generate(messages: list) -> Iterator[tuple[str, dict | None]]:
             raise error from None
 
 
+def _load_history(session_id: str | None, user_id: str | None) -> list:
+    """Read the session's past turns. A memory failure is logged and treated as no history."""
+    if not session_id:
+        return []
+    if not user_id:
+        raise ValueError("user_id is required when session_id is set")
+    try:
+        return get_memory_store().get_history(session_id, user_id=user_id)
+    except Exception as exc:  # noqa: BLE001 - memory must never break answering
+        logger.warning("Loading chat memory failed: %s (code=%s)", type(exc).__name__, getattr(exc, "code", None))
+        return []
+
+
+def _save_turn(session_id: str | None, user_id: str | None, question: str, reply: str) -> None:
+    """Save one turn for this user. A failure is logged, never raised, so the reply still goes out."""
+    if not session_id:
+        return
+    if not user_id:
+        raise ValueError("user_id is required when session_id is set")
+    try:
+        get_memory_store().add_turn(session_id, question, reply, user_id=user_id)
+    except Exception as exc:  # noqa: BLE001 - e.g. postgrest APIError 23503
+        logger.warning("Saving chat memory failed: %s (code=%s)", type(exc).__name__, getattr(exc, "code", None))
+
+
 def _sse(payload: dict) -> str:
     """Format a payload dictionary as a Server-Sent Event frame."""
     return f"data: {json.dumps(payload)}\n\n"
@@ -288,16 +313,18 @@ def answer(
     session_id: str | None = None,
     k: int | None = None,
     collection: str = DEFAULT_COLLECTION,
+    user_id: str | None = None,
 ) -> dict:
     """Answer a question from the documents, using conversation memory when session_id is set.
+
+    Memory is stored per user, so user_id is required whenever session_id is set.
 
     Returns: answer, sources, best_distance, grounded, stats.
     Raises LLMError if the LLM call fails.
     """
     settings = get_settings()
     k = k or settings.top_k
-    store = get_memory_store()
-    history = store.get_history(session_id) if session_id else []
+    history = _load_history(session_id, user_id)
     search_query = rewrite_question(question, history) if session_id else question
 
     stats: dict = {
@@ -314,8 +341,7 @@ def answer(
     stats["retrieval_ms"] = _ms_since(start)
 
     if not chunks:
-        if session_id:
-            store.add_turn(session_id, question, NOT_FOUND_ANSWER)
+        _save_turn(session_id, user_id, question, NOT_FOUND_ANSWER)
         logger.info("RAG gate blocked: best_distance=%s stats=%s", distance, stats)
         log_trace(
             session_id=session_id,
@@ -345,8 +371,7 @@ def answer(
         stats["input_tokens"] = usage.get("input_tokens")
         stats["output_tokens"] = usage.get("output_tokens")
 
-    if session_id:
-        store.add_turn(session_id, question, text)
+    _save_turn(session_id, user_id, question, text)
 
     sources = to_sources(chunks)
     logger.info("RAG answered: best_distance=%.3f stats=%s", distance, stats)
@@ -377,12 +402,17 @@ def stream_answer(
     session_id: str,
     k: int | None = None,
     collection: str = DEFAULT_COLLECTION,
+    *,
+    user_id: str,
 ) -> Iterator[str]:
-    """Stream an answer as SSE events (`token` chunks followed by a final `done` event)."""
+    """Stream an answer as SSE events (`token` chunks followed by a final `done` event).
+
+    The turn is saved under `user_id`. A failed save is only logged, so the
+    final `done` event is always sent.
+    """
     settings = get_settings()
     k = k or settings.top_k
-    store = get_memory_store()
-    history = store.get_history(session_id) if session_id else []
+    history = _load_history(session_id, user_id)
 
     try:
         rewritten = rewrite_question(question, history)
@@ -401,8 +431,7 @@ def stream_answer(
         stats["retrieval_ms"] = _ms_since(start)
 
         if not chunks:
-            if session_id:
-                store.add_turn(session_id, question, NOT_FOUND_ANSWER)
+            _save_turn(session_id, user_id, question, NOT_FOUND_ANSWER)
             logger.info("RAG stream gate blocked: best_distance=%s stats=%s", distance, stats)
             log_trace(
                 session_id=session_id,
@@ -445,8 +474,7 @@ def stream_answer(
             stats["output_tokens"] = usage.get("output_tokens")
 
         full_answer = "".join(collected)
-        if session_id:
-            store.add_turn(session_id, question, full_answer)
+        _save_turn(session_id, user_id, question, full_answer)
 
         sources = to_sources(chunks)
         logger.info("RAG stream answered: best_distance=%.3f stats=%s", distance, stats)

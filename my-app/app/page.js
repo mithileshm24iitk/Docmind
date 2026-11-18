@@ -1,6 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 
 // Backend URL. NEXT_PUBLIC_ values are inlined at `next build` time, so set it
 // before building (e.g. in Vercel project settings), not at runtime.
@@ -69,6 +74,35 @@ async function readErrorMessage(res, fallbackPrefix = 'Request failed') {
     }
   }
   return `${fallbackPrefix} (HTTP ${res.status})`;
+}
+
+// Markdown + math for assistant answers. Defined once (outside the component)
+// so the plugin arrays are not recreated on every streamed token.
+const REMARK_PLUGINS = [remarkGfm, remarkMath];
+const REHYPE_PLUGINS = [rehypeKatex];
+const MARKDOWN_COMPONENTS = {
+  // Links in an answer open in a new tab, so clicking one does not lose the chat.
+  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+};
+
+/**
+ * Render an assistant answer as Markdown with LaTeX math ($...$ and $$...$$).
+ * Safe on partial text while streaming: unfinished syntax just shows as plain
+ * text, and a broken formula is drawn as a red KaTeX error instead of throwing.
+ * Raw HTML in the answer is not rendered (react-markdown escapes it).
+ */
+function AssistantMarkdown({ content }) {
+  return (
+    <div className="markdown">
+      <ReactMarkdown
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
+        components={MARKDOWN_COMPONENTS}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 // Short labels for the "busy / overloaded" statuses the backend can return.
@@ -778,13 +812,17 @@ export default function Home() {
                 </div>
 
                 <div
-                  className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                  className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                     msg.role === 'user'
-                      ? 'bg-emerald-600 text-white max-w-xl'
-                      : 'bg-zinc-900 border border-zinc-800 text-zinc-100 w-full'
+                      ? 'bg-emerald-600 text-white max-w-xl whitespace-pre-wrap'
+                      : 'bg-zinc-900 border border-zinc-800 text-zinc-100 w-full min-w-0'
                   }`}
                 >
-                  {msg.content || (
+                  {msg.role === 'user' ? (
+                    msg.content
+                  ) : msg.content ? (
+                    <AssistantMarkdown content={msg.content} />
+                  ) : (
                     <span className="text-zinc-500 italic animate-pulse">Thinking...</span>
                   )}
                 </div>
