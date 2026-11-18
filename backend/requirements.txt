@@ -1,5 +1,8 @@
 fastapi
-uvicorn
-Flask
-Authlib
+uvicorn[standard]
+python-multipart
+pypdf
+python-docx
+langchain-core
+langchain-text-splitters
 python-dotenv
