@@ -1,0 +1,17 @@
+# Keep secrets, local data and dev-only files out of the Docker build context.
+.env
+.env.*
+!.env.example
+.venv/
+data/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+eval/
+.git
+.gitignore
+Dockerfile
+.dockerignore
+.gcloudignore

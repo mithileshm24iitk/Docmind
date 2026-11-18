@@ -2,10 +2,13 @@
 
 from datetime import datetime, timezone
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
-from app.config import BACKEND_DIR
+from app.config import BACKEND_DIR, get_settings
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TRACE_PATH = BACKEND_DIR / "data" / "traces.jsonl"
 
@@ -42,9 +45,13 @@ def log_trace(
     num_sources: int,
     trace_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Append one structured JSON trace line to backend/data/traces.jsonl."""
-    path = trace_path or DEFAULT_TRACE_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Append one structured JSON trace line to the traces file.
+
+    Path order: `trace_path` argument, then TRACES_PATH env, then
+    backend/data/traces.jsonl. Tracing is best effort: if the file can't be
+    written (e.g. read-only disk), we log a warning and still return the entry.
+    """
+    path = trace_path or get_settings().traces_path or DEFAULT_TRACE_PATH
 
     entry: dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -62,7 +69,11 @@ def log_trace(
         "num_sources": num_sources,
     }
 
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError as e:
+        logger.warning("Could not write trace to %s: %s", path, e)
 
     return entry

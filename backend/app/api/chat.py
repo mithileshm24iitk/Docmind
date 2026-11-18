@@ -14,6 +14,8 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
 MAX_QUESTION_CHARS = 2000
 MAX_SESSION_ID_CHARS = 128
 
@@ -67,6 +69,9 @@ def stream(
     return StreamingResponse(
         _event_stream(),
         media_type="text/event-stream",
+        # Stop proxies (Cloud Run front end, nginx) from caching or buffering
+        # the stream, so tokens arrive as they are generated.
+        headers=SSE_HEADERS,
     )
 
 

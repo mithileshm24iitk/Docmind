@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-const API_BASE = 'http://localhost:8000';
+// Backend URL. NEXT_PUBLIC_ values are inlined at `next build` time, so set it
+// before building (e.g. in Vercel project settings), not at runtime.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const TOKEN_STORAGE_KEY = 'documind_token';
 
 /**
@@ -119,7 +121,7 @@ export default function Home() {
       } catch (err) {
         setChatError(
           err.message === 'Failed to fetch'
-            ? 'Cannot reach backend at http://localhost:8000. Is FastAPI running?'
+            ? `Cannot reach backend at ${API_BASE}. Is FastAPI running?`
             : err.message || 'Failed to load documents.'
         );
       }
@@ -182,7 +184,7 @@ export default function Home() {
         if (!ignore) {
           setAuthError(
             err.message === 'Failed to fetch'
-              ? 'Cannot reach backend at http://localhost:8000. Is FastAPI running?'
+              ? `Cannot reach backend at ${API_BASE}. Is FastAPI running?`
               : err.message || 'Authentication failed.'
           );
         }
@@ -242,7 +244,7 @@ export default function Home() {
     } catch (err) {
       setAuthError(
         err.message === 'Failed to fetch'
-          ? 'Cannot reach backend at http://localhost:8000. Is FastAPI running?'
+          ? `Cannot reach backend at ${API_BASE}. Is FastAPI running?`
           : err.message || 'Failed to start Google login.'
       );
       setAuthLoading(false);
@@ -287,7 +289,7 @@ export default function Home() {
     } catch (err) {
       setUploadError(
         err.message === 'Failed to fetch'
-          ? 'Cannot reach backend at http://localhost:8000.'
+          ? `Cannot reach backend at ${API_BASE}.`
           : err.message || 'Upload failed.'
       );
     } finally {
@@ -324,7 +326,7 @@ export default function Home() {
     } catch (err) {
       setChatError(
         err.message === 'Failed to fetch'
-          ? 'Local chat cleared, but backend at http://localhost:8000 was unreachable.'
+          ? `Local chat cleared, but backend at ${API_BASE} was unreachable.`
           : err.message
       );
     }

@@ -1,4 +1,8 @@
-"""App settings loaded from environment variables and backend/.env."""
+"""App settings loaded from environment variables and backend/.env.
+
+Real environment variables always win. The .env file is optional: in the
+Docker/Cloud Run container there is none, and pydantic-settings simply skips it.
+"""
 
 from functools import lru_cache
 from pathlib import Path
@@ -43,6 +47,17 @@ class Settings(BaseSettings):
     supabase_key: str = ""
     google_client_id: str = ""
     google_client_secret: str = ""
+
+    # --- Deployment (phase 9) ---
+    # Comma-separated list of browser origins allowed to call the API.
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    # Where RAG traces are appended. None = backend/data/traces.jsonl.
+    traces_path: Path | None = None
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        """Split CORS_ORIGINS on commas, trimming spaces and dropping empties."""
+        return [o.strip().rstrip("/") for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache

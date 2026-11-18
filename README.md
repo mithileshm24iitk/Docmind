@@ -1,209 +1,116 @@
-# Demo Frontend and Backend
+# DocuMind
 
-This workspace contains one shared FastAPI backend and two equivalent React
-frontends:
+DocuMind is a RAG (retrieval-augmented generation) assistant. You upload your
+own documents (PDF, DOCX, TXT), ask questions, and it answers **only** from
+those documents, with citations (file + page). If the documents don't support
+an answer, it says it doesn't know.
 
-- `backend`: FastAPI API on `http://localhost:8000`
-- `React_Frontend`: Vite React app on `http://localhost:5173`
-- `my-app`: Next.js app on `http://localhost:3000`
+Features: hybrid search (vector + BM25 keyword search fused with Reciprocal
+Rank Fusion), a relevance gate, conversation memory, streaming answers
+(Server-Sent Events), Google login with Supabase, and an eval/tracing layer.
 
-Both frontends call the same backend endpoints and provide backend status and
-JSON echo functionality.
-
-## Project structure
+## Architecture
 
 ```text
-Demo/
-├── backend/
-│   └── main.py
-├── React_Frontend/
-│   ├── src/
-│   └── package.json
-├── my-app/
-│   ├── app/
-│   └── package.json
-└── README.md
+ Browser ──► Next.js frontend (my-app/, deployed on Vercel)
+                 │  fetch + SSE, Bearer JWT
+                 ▼
+          FastAPI backend (backend/, Docker on Google Cloud Run)
+           ├─ api/        /documents, /chat/ask, /chat/stream, /auth
+           ├─ ingestion/  load files → split into chunks
+           ├─ retrieval/  Gemini embeddings → ChromaDB, BM25, hybrid RRF
+           ├─ rag/        prompt + Gemini LLM, memory, tracing (JSONL)
+           └─ db.py       Supabase client (users, chats)
+                 │
+                 ├──► Gemini API (embeddings + chat model)
+                 └──► Supabase (Postgres)
 ```
 
-## Prerequisites
+- **Vector store:** ChromaDB on local disk (`CHROMA_DIR`). The BM25 index is
+  rebuilt in memory from it.
+- **Traces:** one JSON line per question in `TRACES_PATH` (best effort: a
+  failed write logs a warning and never breaks a request).
+- **Streaming:** `/chat/stream` sends `Cache-Control: no-cache` and
+  `X-Accel-Buffering: no`, and no GZip middleware is used, so tokens are not
+  buffered by proxies such as Cloud Run's front end.
 
-Install the following software:
+> **Note on Cloud Run storage:** `/tmp` in Cloud Run is in-memory and is wiped
+> when an instance stops. Each instance also has its own copy. Uploaded
+> documents and conversation memory are therefore lost on restart and are not
+> shared between instances. For a demo, deploy with `--max-instances=1`.
 
-- Python 3.10 or newer
-- Node.js 18.18 or newer
-- npm
+## Run locally
 
-Check installed versions:
-
-```bash
-python --version
-node --version
-npm --version
-```
-
-## 1. Set up the backend
-
-Open a terminal at the workspace root:
+Backend (Python 3.12):
 
 ```bash
 cd backend
-python -m venv .venv
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env            # then fill in the values
+.venv/bin/uvicorn app.main:app --reload --port 8000
+.venv/bin/python -m pytest -q   # offline tests (fake LLM/embeddings)
 ```
 
-Activate the virtual environment.
-
-Linux/macOS:
-
-```bash
-source .venv/bin/activate
-```
-
-Windows PowerShell:
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-Install the backend packages:
-
-```bash
-python -m pip install --upgrade pip
-python -m pip install fastapi uvicorn
-```
-
-Start the backend:
-
-```bash
-python main.py
-```
-
-The API is now available at `http://localhost:8000`.
-
-Keep this terminal running.
-
-## 2. Set up the Vite React frontend
-
-Open a second terminal at the workspace root:
-
-```bash
-cd React_Frontend
-npm install
-npm run dev
-```
-
-Open `http://localhost:5173` in a browser.
-
-Useful commands:
-
-```bash
-npm run lint
-npm run build
-npm run preview
-```
-
-## 3. Set up the Next.js frontend
-
-Open another terminal at the workspace root:
+Frontend:
 
 ```bash
 cd my-app
 npm install
-npm run dev
+cp .env.example .env.local      # NEXT_PUBLIC_API_URL=http://localhost:8000
+npm run dev                     # http://localhost:3000
 ```
 
-Open `http://localhost:3000` in a browser.
+## Docker
 
-Useful commands:
+Build and run the backend image locally (env vars passed from your `.env`
+file at run time; the file itself is never copied into the image):
 
 ```bash
-npm run lint
-npm run build
-npm run start
+cd backend
+docker build -t documind-backend .
+docker run --rm -p 8080:8080 --env-file .env \
+  -e CORS_ORIGINS=http://localhost:3000 documind-backend
+curl http://localhost:8080/health
 ```
 
-Only one frontend is needed for normal use. Both can run at the same time and
-share the same backend if ports `3000` and `5173` are available.
+Cloud Run sets `PORT` itself; the container listens on `${PORT:-8080}`.
 
-## Backend API
+## Frontend build-time variable
 
-| Method | URL | Description |
-| --- | --- | --- |
-| `GET` | `http://localhost:8000/` | Returns the backend running message |
-| `GET` | `http://localhost:8000/health` | Returns the health status |
-| `POST` | `http://localhost:8000/echo` | Returns the submitted JSON under `data` |
+`NEXT_PUBLIC_*` values are **inlined into the JavaScript bundle at
+`next build` time**. Changing `NEXT_PUBLIC_API_URL` later has no effect until
+you rebuild/redeploy the frontend. On Vercel, set it in the project's
+environment variables before the build.
 
-Example API checks:
+## Environment variables
 
-```bash
-curl http://localhost:8000/
-curl http://localhost:8000/health
-curl -X POST http://localhost:8000/echo \
-  -H "Content-Type: application/json" \
-  -d '{"message":"hello"}'
-```
+Backend (`backend/app/config.py`). Real env vars override `backend/.env`;
+the `.env` file is optional and missing in the container.
 
-Expected echo response:
+| Variable | Description | Secret? | Default |
+| --- | --- | --- | --- |
+| `GOOGLE_API_KEY` | Gemini API key (embeddings + LLM) | **Yes** | empty |
+| `SUPABASE_URL` | Supabase project URL | No | empty |
+| `SUPABASE_KEY` | Supabase API key (also a fallback JWT signing key) | **Yes** | empty |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID | No | empty |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret (also used to sign app JWTs) | **Yes** | empty |
+| `CORS_ORIGINS` | Comma-separated allowed browser origins | No | `http://localhost:3000,http://127.0.0.1:3000` |
+| `CHROMA_DIR` | ChromaDB folder | No | `backend/data/chroma` (container: `/tmp/chroma`) |
+| `TRACES_PATH` | JSONL trace file | No | `backend/data/traces.jsonl` (container: `/tmp/traces.jsonl`) |
+| `EMBEDDING_MODEL` | Gemini embedding model | No | `gemini-embedding-001` |
+| `LLM_MODEL` | Gemini chat model | No | see `config.py` |
+| `LLM_FALLBACK_MODELS` | JSON list of fallback models | No | see `config.py` |
+| `LLM_TEMPERATURE` | LLM temperature | No | `0.2` |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | Chunking sizes (characters) | No | `1000` / `200` |
+| `TOP_K` | Chunks sent to the LLM | No | `5` |
+| `RELEVANCE_MAX_DISTANCE` | Relevance gate cosine-distance cutoff | No | `0.6` |
+| `MEMORY_MAX_TURNS` | Conversation turns kept per session | No | `5` |
+| `PORT` | Port uvicorn listens on (set by Cloud Run) | No | `8080` |
+| `FORWARDED_ALLOW_IPS` | IPs uvicorn trusts for `X-Forwarded-*` headers | No | `*` in the image |
 
-```json
-{
-  "data": {
-    "message": "hello"
-  }
-}
-```
+Frontend (`my-app/`):
 
-## How connectivity works
-
-1. The browser opens either the Vite app or the Next.js app.
-2. The frontend sends `GET /` and `GET /health` to port `8000`.
-3. The backend returns JSON and the frontend displays the message and health.
-4. The user submits a JSON payload from the echo form.
-5. The frontend sends `POST /echo` to port `8000`.
-6. FastAPI returns the payload inside a `data` property.
-7. The frontend displays the formatted response or an error.
-
-The backend CORS configuration allows these frontend origins:
-
-- `http://localhost:3000`
-- `http://127.0.0.1:3000`
-- `http://localhost:5173`
-- `http://127.0.0.1:5173`
-
-## Detailed flow documentation
-
-Read both files to understand the implementation in more detail:
-
-- [React frontend flow](React_Frontend/FLOW.md): Vite startup, React mounting,
-  state, requests, and styling.
-- [Next.js flow](my-app/FLOW.md): App Router layout, page composition,
-  hydration, client requests, and styling.
-
-## Troubleshooting
-
-### Backend unavailable
-
-Confirm that the backend terminal is running and listening on port `8000`:
-
-```bash
-curl http://localhost:8000/health
-```
-
-### CORS error
-
-Use the correct frontend URL and confirm its origin is listed in
-`backend/main.py`. Restart the backend after changing CORS settings.
-
-### Port already in use
-
-Stop the process using the port, or start the frontend on another port. The
-frontend fetch URLs currently target port `8000` for the backend.
-
-### Invalid echo payload
-
-The echo endpoint expects a JSON object. For example:
-
-```json
-{
-  "message": "Hello from the frontend"
-}
-```
+| Variable | Description | Secret? | Default |
+| --- | --- | --- | --- |
+| `NEXT_PUBLIC_API_URL` | Backend base URL (build-time) | No (public in the bundle) | `http://localhost:8000` |
