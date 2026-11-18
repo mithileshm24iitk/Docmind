@@ -1,12 +1,14 @@
-"""Shared test setup: temp Chroma dir, no real API key, fake embeddings."""
+"""Shared test setup: temp Chroma dir, no real API key, fake embeddings and LLM."""
 
 import hashlib
 import math
 
 import pytest
 from langchain_core.embeddings import Embeddings
+from langchain_core.messages import AIMessage
 
 from app.config import get_settings
+from app.rag import chain
 from app.retrieval import bm25, vectorstore
 
 
@@ -55,4 +57,37 @@ def fake_embeddings(monkeypatch) -> FakeEmbeddings:
     """Make the vector store use FakeEmbeddings instead of Gemini."""
     fake = FakeEmbeddings()
     monkeypatch.setattr(vectorstore, "get_embeddings", lambda: fake)
+    return fake
+
+
+class FakeLLM:
+    """Stands in for ChatGoogleGenerativeAI. Records every call, never hits the network.
+
+    Set `error` to make invoke() raise, to test error handling.
+    """
+
+    def __init__(self, reply: str = "Plants use sunlight [notes.txt, p.1].") -> None:
+        self.reply = reply
+        self.calls: list[list] = []  # the messages passed to each invoke()
+        self.error: Exception | None = None
+
+    @property
+    def call_count(self) -> int:
+        return len(self.calls)
+
+    def invoke(self, messages: list) -> AIMessage:
+        self.calls.append(messages)
+        if self.error is not None:
+            raise self.error
+        return AIMessage(
+            content=self.reply,
+            usage_metadata={"input_tokens": 120, "output_tokens": 15, "total_tokens": 135},
+        )
+
+
+@pytest.fixture
+def fake_llm(monkeypatch) -> FakeLLM:
+    """Make the RAG chain use FakeLLM instead of Gemini."""
+    fake = FakeLLM()
+    monkeypatch.setattr(chain, "get_llm", lambda: fake)
     return fake

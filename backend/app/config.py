@@ -25,6 +25,15 @@ class Settings(BaseSettings):
     chunk_size: int = 1000
     chunk_overlap: int = 200
 
+    # --- RAG chain (phase 4) ---
+    # Stable Gemini text model from the Gemini API models page (ai.google.dev).
+    llm_model: str = "gemini-3.8-flash"
+    llm_temperature: float = 0.2
+    top_k: int = 5  # chunks sent to the LLM as context
+    # Cosine distance cutoff for the relevance gate (0 = identical, larger = less
+    # similar). If even the closest chunk is farther than this, we skip the LLM.
+    relevance_max_distance: float = 0.6
+
 
 @lru_cache
 def get_settings() -> Settings:

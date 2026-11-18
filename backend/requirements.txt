@@ -8,6 +8,7 @@ langchain-text-splitters
 python-dotenv
 pydantic-settings
 langchain-google-genai
+google-genai
 langchain-chroma
 rank-bm25
 pytest

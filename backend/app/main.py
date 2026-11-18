@@ -1,7 +1,12 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import documents
+from app.api import chat, documents
+
+# Show our app's INFO logs (e.g. RAG latency/token stats) next to uvicorn's.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 app = FastAPI(title="DocuMind API", version="0.1.0")
 
@@ -14,6 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(documents.router)
+app.include_router(chat.router)
 
 
 @app.get("/")

@@ -12,6 +12,16 @@ def test_defaults_without_env_file(monkeypatch):
     assert s.chroma_dir.parts[-3:] == ("backend", "data", "chroma")
 
 
+def test_rag_defaults(monkeypatch):
+    for name in ["LLM_MODEL", "LLM_TEMPERATURE", "TOP_K", "RELEVANCE_MAX_DISTANCE"]:
+        monkeypatch.delenv(name, raising=False)
+    s = Settings(_env_file=None)
+    assert s.llm_model == "gemini-3.8-flash"
+    assert s.llm_temperature == 0.2
+    assert s.top_k == 5
+    assert s.relevance_max_distance == 0.6
+
+
 def test_env_var_overrides(tmp_path, monkeypatch):
     monkeypatch.setenv("CHROMA_DIR", str(tmp_path))
     monkeypatch.setenv("CHUNK_SIZE", "500")
