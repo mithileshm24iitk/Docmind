@@ -168,3 +168,16 @@ def test_fallback_model_used_on_503(fake_embeddings, monkeypatch, caplog):
     assert models_called == ["gemini-3.8-flash", "gemini-2.5-flash"]
     assert any("gemini-2.5-flash" in r.message for r in caplog.records)
 
+
+
+def test_gemini_model_fails_fast_so_fallback_can_run(monkeypatch):
+    # Building ChatGoogleGenerativeAI is offline; it only stores the settings.
+    monkeypatch.setenv("GOOGLE_API_KEY", "fake-key-for-test")
+    chain.get_settings.cache_clear()
+    chain._get_llm_for_model.cache_clear()
+    try:
+        llm = chain.get_llm("gemini-2.5-flash")
+        assert llm.max_retries == 1
+        assert llm.timeout == 30
+    finally:
+        chain._get_llm_for_model.cache_clear()

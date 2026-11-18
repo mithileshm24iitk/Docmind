@@ -1,19 +1,26 @@
 """Unit tests for Phase 8: structured tracing and the RAG evaluation harness."""
 
+import argparse
 import json
 from pathlib import Path
 
+import pytest
 from langchain_core.documents import Document
 
 from app.rag import tracing
 from app.rag.chain import answer, stream_answer
 from app.retrieval import vectorstore
 from eval.run_eval import (
+    compute_mrr,
     compute_percentile,
     compute_recall_at_k,
     estimate_cost_per_1k_queries,
+    first_hit_rank,
     format_markdown_summary,
+    is_chunk_hit,
+    is_page_hit,
     main,
+    parse_k_list,
     run_evaluation,
 )
 
@@ -135,6 +142,7 @@ def test_run_eval_end_to_end_fake_embeddings_and_llm(tmp_path: Path, fake_embedd
             "expected_page": 1,
             "expected_keywords": ["8.2"],
             "should_answer": True,
+            "category": "keyword",
         },
         {
             "id": "q2",
@@ -143,6 +151,7 @@ def test_run_eval_end_to_end_fake_embeddings_and_llm(tmp_path: Path, fake_embedd
             "expected_page": 3,
             "expected_keywords": ["projection"],
             "should_answer": True,
+            "category": "semantic",
         },
         {
             "id": "q3",
@@ -165,17 +174,24 @@ def test_run_eval_end_to_end_fake_embeddings_and_llm(tmp_path: Path, fake_embedd
             str(dataset_file),
             "--k",
             "2",
+            "--k-list",
+            "1,2",
             "--retrieval-only",
             "--output",
             str(results_file),
         ]
     )
     assert fake_llm.call_count == 0
-    assert out_retrieval["metrics"]["retrieval_only"] is True
-    assert out_retrieval["metrics"]["vector_recall_at_k"] == 1.0
-    assert out_retrieval["metrics"]["bm25_recall_at_k"] == 1.0
-    assert out_retrieval["metrics"]["hybrid_recall_at_k"] == 1.0
-    assert out_retrieval["metrics"]["refusal_accuracy"] is None
+    m = out_retrieval["metrics"]
+    assert m["retrieval_only"] is True
+    assert m["k_list"] == [1, 2]
+    for name in ["vector", "bm25", "hybrid"]:
+        assert m["retrieval"][name]["recall@2"] == 1.0
+        assert m["retrieval"][name]["mrr"] > 0
+        assert m["retrieval"][name]["page_recall@2"] == 1.0
+    assert set(m["by_category"]) == {"keyword", "semantic"}
+    assert m["by_category"]["keyword"]["num_questions"] == 1
+    assert m["refusal_accuracy"] is None
 
     # 2. Test full mode (retrieval + generation)
     out_full = run_evaluation(
@@ -183,23 +199,120 @@ def test_run_eval_end_to_end_fake_embeddings_and_llm(tmp_path: Path, fake_embedd
         k=2,
         retrieval_only=False,
         results_path=results_file,
+        k_list=[1, 2],
+        sleep=lambda s: None,
     )
     metrics = out_full["metrics"]
     assert metrics["retrieval_only"] is False
-    assert metrics["vector_recall_at_k"] == 1.0
-    assert metrics["bm25_recall_at_k"] == 1.0
-    assert metrics["hybrid_recall_at_k"] == 1.0
+    for name in ["vector", "bm25", "hybrid"]:
+        assert metrics["retrieval"][name]["recall@2"] == 1.0
     assert metrics["refusal_accuracy"] == 1.0
     assert metrics["retrieval_p50_ms"] >= 0.0
     assert metrics["generation_p50_ms"] >= 0.0
     assert metrics["estimated_cost_per_1k_usd"] > 0.0
 
     saved = json.loads(results_file.read_text(encoding="utf-8"))
-    assert saved["metrics"]["hybrid_recall_at_k"] == 1.0
+    assert saved["metrics"]["retrieval"]["hybrid"]["recall@2"] == 1.0
     assert len(saved["questions"]) == 3
 
     md = format_markdown_summary(metrics)
-    assert "| Vector Recall@2 | 100.00% |" in md
+    assert "| vector | " in md and "Recall@2" in md
+    assert "#### By category" in md
     assert "| Refusal Accuracy | 100.00% |" in md
     captured = capsys.readouterr().out
     assert "DocuMind RAG Evaluation Summary" in captured
+
+
+# ---------- Part 3: chunk-level hits, MRR, k-list, categories, throttle ----------
+
+ITEM = {"expected_source": "a.pdf", "expected_page": 2, "expected_keywords": ["Volume", "parallelepiped"]}
+
+
+def test_chunk_hit_needs_source_and_keyword():
+    meta = {"source": "a.pdf", "page": 2}
+    assert is_chunk_hit(meta, "the VOLUME of a box", ITEM)  # case-insensitive
+    assert not is_chunk_hit(meta, "right page but no keyword", ITEM)
+    assert not is_chunk_hit({"source": "b.pdf", "page": 2}, "volume", ITEM)
+    assert not is_chunk_hit(meta, "volume", {**ITEM, "expected_keywords": []})
+
+
+def test_page_hit_is_secondary_and_ignores_keywords():
+    assert is_page_hit({"source": "a.pdf", "page": 2}, ITEM)
+    assert not is_page_hit({"source": "a.pdf", "page": 3}, ITEM)
+    assert is_page_hit({"source": "a.pdf", "page": 9}, {**ITEM, "expected_page": 0})
+
+
+def test_first_hit_rank_and_mrr():
+    chunks = [
+        ("unrelated", {"source": "a.pdf", "page": 2}),
+        ("a parallelepiped", {"source": "a.pdf", "page": 2}),
+    ]
+    assert first_hit_rank(chunks, ITEM) == 2
+    assert first_hit_rank(chunks[:1], ITEM) is None
+    assert compute_mrr([1, 2, None, 4]) == round((1 + 0.5 + 0 + 0.25) / 4, 4)
+    assert compute_mrr([]) == 0.0
+
+
+def test_parse_k_list():
+    assert parse_k_list("5,1,3,3") == [1, 3, 5]
+    with pytest.raises(argparse.ArgumentTypeError):
+        parse_k_list("0,1")
+
+
+def _seed_two_chunks():
+    vectorstore.add_chunks(
+        "default",
+        [
+            Document(page_content="filler words about nothing", metadata={"source": "a.pdf", "page": 2, "chunk_id": 0}),
+            Document(page_content="the box volume formula", metadata={"source": "a.pdf", "page": 2, "chunk_id": 1}),
+        ],
+    )
+
+
+def test_page_match_without_keyword_is_not_a_hit(fake_embeddings):
+    _seed_two_chunks()
+    item = {
+        "id": "q", "question": "filler words", "category": "semantic", "should_answer": True,
+        "expected_source": "a.pdf", "expected_page": 2, "expected_keywords": ["nonexistent"],
+    }
+    m = run_evaluation([item], retrieval_only=True, results_path=None, k_list=[1, 2])["metrics"]
+    for name in ["vector", "bm25", "hybrid"]:
+        assert m["retrieval"][name]["recall@2"] == 0.0  # chunk-level: no keyword -> miss
+        assert m["retrieval"][name]["mrr"] == 0.0
+        assert m["retrieval"][name]["page_recall@2"] == 1.0  # page-level still matches
+
+
+def test_uncategorized_items_get_their_own_row(fake_embeddings):
+    _seed_two_chunks()
+    item = {
+        "id": "q", "question": "box volume", "should_answer": True,
+        "expected_source": "a.pdf", "expected_page": 2, "expected_keywords": ["volume"],
+    }
+    m = run_evaluation([item], retrieval_only=True, results_path=None, k_list=[1])["metrics"]
+    assert list(m["by_category"]) == ["uncategorized"]
+
+
+def test_full_mode_throttles_only_between_llm_calls(fake_embeddings, fake_llm):
+    _seed_two_chunks()
+    grounded = {
+        "question": "box volume formula", "should_answer": True,
+        "expected_source": "a.pdf", "expected_page": 2, "expected_keywords": ["volume"],
+    }
+    refusal = {"question": "sourdough baking temperature", "should_answer": False}
+    waits: list[float] = []
+    run_evaluation(
+        [grounded, grounded, refusal, grounded],
+        results_path=None, k_list=[1], throttle_seconds=13, sleep=waits.append,
+    )
+    # LLM calls: q1, q2, q4 (q3 is blocked by the relevance gate, no LLM).
+    # Waits: before q2 (after q1), before q3 (after q2). None before q4 (q3 used no LLM).
+    assert fake_llm.call_count == 3
+    assert waits == [13, 13]
+
+
+def test_retrieval_only_never_throttles(fake_embeddings, fake_llm):
+    _seed_two_chunks()
+    item = {"question": "box volume", "should_answer": True, "expected_source": "a.pdf", "expected_keywords": ["volume"]}
+    waits: list[float] = []
+    run_evaluation([item, item], retrieval_only=True, results_path=None, sleep=waits.append)
+    assert waits == []

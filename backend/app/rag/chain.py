@@ -39,7 +39,9 @@ from app.retrieval.vectorstore import DEFAULT_COLLECTION
 
 logger = logging.getLogger(__name__)
 
-LLM_TIMEOUT_S = 60
+LLM_TIMEOUT_S = 30
+# 1 attempt total, so a 503 fails fast and the fallback models get a turn.
+LLM_MAX_RETRIES = 1
 SNIPPET_CHARS = 200
 
 
@@ -67,7 +69,7 @@ def _get_llm_for_model(model: str) -> BaseChatModel:
         temperature=settings.llm_temperature,
         google_api_key=settings.google_api_key,
         timeout=LLM_TIMEOUT_S,
-        max_retries=2,
+        max_retries=LLM_MAX_RETRIES,
     )
 
 

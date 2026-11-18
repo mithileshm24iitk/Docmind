@@ -71,6 +71,108 @@ async function readErrorMessage(res, fallbackPrefix = 'Request failed') {
   return `${fallbackPrefix} (HTTP ${res.status})`;
 }
 
+// Short labels for the "busy / overloaded" statuses the backend can return.
+const STATUS_LABELS = {
+  429: 'Rate limit reached (HTTP 429). Wait about a minute, then try again.',
+  502: 'The AI service returned an error (HTTP 502). Please try again.',
+  503: 'Service temporarily unavailable (HTTP 503). Please try again shortly.',
+  504: 'The AI service timed out (HTTP 504). Please try again.',
+};
+
+/**
+ * Put a clear status label in front of the backend's own message for 429/502/503/504.
+ */
+function withStatusLabel(status, message) {
+  const label = STATUS_LABELS[status];
+  if (!label) return message;
+  return message ? `${label} Details: ${message}` : label;
+}
+
+/**
+ * Read the backend's error message from a failed Response and add a status label.
+ */
+async function describeHttpError(res, fallbackPrefix) {
+  return withStatusLabel(res.status, await readErrorMessage(res, fallbackPrefix));
+}
+
+/**
+ * Turn a thrown fetch error into a readable message ("Failed to fetch" = backend unreachable).
+ */
+function networkMessage(err, fallback) {
+  if (err?.name === 'TypeError') {
+    return `Cannot reach backend at ${API_BASE}. Is FastAPI running?`;
+  }
+  return err?.message || fallback;
+}
+
+/**
+ * Resolve who is logged in: finish a Google `?code=` redirect, or verify a saved token.
+ * Never throws. Returns { token, user } on success, { error } on failure, {} if logged out.
+ */
+async function checkAuth() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const oauthCode = params.get('code');
+    const oauthError = params.get('error');
+    if (oauthCode || oauthError) {
+      // Remove ?code= / ?error= so a refresh does not reuse a one-time code.
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    if (oauthError) {
+      return { error: `Google sign-in was cancelled or failed (${oauthError}).` };
+    }
+
+    if (oauthCode) {
+      const res = await fetch(`${API_BASE}/auth/google`, {
+        method: 'POST',
+        headers: buildAuthHeaders('', { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ code: oauthCode, redirect_uri: window.location.origin }),
+      });
+      if (!res.ok) {
+        return { error: await describeHttpError(res, 'Google sign-in failed') };
+      }
+      const data = await res.json();
+      localStorage.setItem(TOKEN_STORAGE_KEY, data.access_token);
+      return { token: data.access_token, user: data.user };
+    }
+
+    const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (!storedToken) return {};
+
+    const res = await fetch(`${API_BASE}/auth/verify`, {
+      headers: buildAuthHeaders(storedToken),
+    });
+    if (res.status === 401) {
+      // The saved token is expired or was signed with an old key: drop it.
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      const msg = await readErrorMessage(res, 'Session check failed');
+      return { error: `Your session has expired. Please sign in again. (${msg})` };
+    }
+    if (!res.ok) {
+      // Server-side problem (e.g. 503 auth not configured): keep the token, show why.
+      return { error: await describeHttpError(res, 'Could not verify your session') };
+    }
+    const data = await res.json();
+    if (!data.valid) {
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      return { error: 'Your session is no longer valid. Please sign in again.' };
+    }
+    return { token: storedToken, user: data.user };
+  } catch (err) {
+    return { error: networkMessage(err, 'Authentication failed.') };
+  }
+}
+
+// React Strict Mode (on by default in dev) runs effects twice. A Google `code`
+// can be exchanged only once, so both runs share this one promise; otherwise
+// the first run's result was discarded and the user silently landed back on
+// the login screen.
+let authCheckPromise = null;
+function checkAuthOnce() {
+  if (!authCheckPromise) authCheckPromise = checkAuth();
+  return authCheckPromise;
+}
+
 export default function Home() {
   const [token, setToken] = useState('');
   const [user, setUser] = useState(null);
@@ -83,6 +185,7 @@ export default function Home() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [uploadSuccess, setUploadSuccess] = useState(null);
+  const [deletingFile, setDeletingFile] = useState(''); // filename being deleted, '' if none
 
   const [messages, setMessages] = useState([]);
   const [question, setQuestion] = useState('');
@@ -92,14 +195,22 @@ export default function Home() {
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
 
-  const handleLogout = useCallback(() => {
+  // Sign out. `reason` (optional) is shown on the login screen, e.g. after a 401.
+  const handleLogout = useCallback((reason = '') => {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
+    authCheckPromise = null;
     setToken('');
     setUser(null);
     setMessages([]);
     setDocuments([]);
     setChatError('');
+    setAuthError(typeof reason === 'string' ? reason : '');
   }, []);
+
+  // Any 401 from a protected route means the token is stale: clear it and say so.
+  const handleExpiredSession = useCallback(() => {
+    handleLogout('Your session has expired. Please sign in again.');
+  }, [handleLogout]);
 
   const fetchDocuments = useCallback(
     async (activeToken = token) => {
@@ -109,93 +220,36 @@ export default function Home() {
           headers: buildAuthHeaders(activeToken),
         });
         if (res.status === 401) {
-          handleLogout();
+          handleExpiredSession();
           return;
         }
         if (!res.ok) {
-          const msg = await readErrorMessage(res, 'Failed to load documents');
-          throw new Error(msg);
+          throw new Error(await describeHttpError(res, 'Failed to load documents'));
         }
         const data = await res.json();
         setDocuments(data.documents || []);
       } catch (err) {
-        setChatError(
-          err.message === 'Failed to fetch'
-            ? `Cannot reach backend at ${API_BASE}. Is FastAPI running?`
-            : err.message || 'Failed to load documents.'
-        );
+        setChatError(networkMessage(err, 'Failed to load documents.'));
       }
     },
-    [token, handleLogout]
+    [token, handleExpiredSession]
   );
 
-  // On mount: handle Google OAuth `?code=` callback or verify existing saved token
+  // On mount: finish a Google `?code=` callback or verify the saved token.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSessionId(crypto.randomUUID());
 
     let ignore = false;
-    async function initAuth() {
-      setAuthError('');
-
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const oauthCode = params.get('code');
-
-        if (oauthCode) {
-          window.history.replaceState({}, '', window.location.pathname);
-          const res = await fetch(`${API_BASE}/auth/google`, {
-            method: 'POST',
-            headers: buildAuthHeaders('', { 'Content-Type': 'application/json' }),
-            body: JSON.stringify({
-              code: oauthCode,
-              redirect_uri: window.location.origin,
-            }),
-          });
-          if (!res.ok) {
-            const msg = await readErrorMessage(res, 'Google sign-in failed');
-            throw new Error(msg);
-          }
-          const data = await res.json();
-          if (!ignore) {
-            localStorage.setItem(TOKEN_STORAGE_KEY, data.access_token);
-            setToken(data.access_token);
-            setUser(data.user);
-          }
-          return;
-        }
-
-        const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-        if (!storedToken) return;
-
-        const verifyRes = await fetch(`${API_BASE}/auth/verify`, {
-          headers: buildAuthHeaders(storedToken),
-        });
-        if (!verifyRes.ok) {
-          localStorage.removeItem(TOKEN_STORAGE_KEY);
-          return;
-        }
-        const verifyData = await verifyRes.json();
-        if (!ignore && verifyData.valid) {
-          setToken(storedToken);
-          setUser(verifyData.user);
-        }
-      } catch (err) {
-        if (!ignore) {
-          setAuthError(
-            err.message === 'Failed to fetch'
-              ? `Cannot reach backend at ${API_BASE}. Is FastAPI running?`
-              : err.message || 'Authentication failed.'
-          );
-        }
-      } finally {
-        if (!ignore) {
-          setAuthChecking(false);
-        }
+    checkAuthOnce().then((result) => {
+      if (ignore) return;
+      if (result.token && result.user) {
+        setToken(result.token);
+        setUser(result.user);
       }
-    }
-
-    initAuth();
+      setAuthError(result.error || '');
+      setAuthChecking(false);
+    });
     return () => {
       ignore = true;
     };
@@ -233,8 +287,7 @@ export default function Home() {
         }
       );
       if (!res.ok) {
-        const msg = await readErrorMessage(res, 'Could not start Google login');
-        throw new Error(msg);
+        throw new Error(await describeHttpError(res, 'Could not start Google login'));
       }
       const data = await res.json();
       if (!data.auth_url) {
@@ -242,11 +295,7 @@ export default function Home() {
       }
       window.location.href = data.auth_url;
     } catch (err) {
-      setAuthError(
-        err.message === 'Failed to fetch'
-          ? `Cannot reach backend at ${API_BASE}. Is FastAPI running?`
-          : err.message || 'Failed to start Google login.'
-      );
+      setAuthError(networkMessage(err, 'Failed to start Google login.'));
       setAuthLoading(false);
     }
   }
@@ -270,13 +319,13 @@ export default function Home() {
       });
 
       if (res.status === 401) {
-        handleLogout();
+        handleExpiredSession();
         return;
       }
 
       if (!res.ok) {
-        const msg = await readErrorMessage(res, 'Upload failed');
-        throw new Error(msg);
+        // 413 (too big / too many pages), 429 / 503 (embedding rate limit) etc.
+        throw new Error(await describeHttpError(res, 'Upload failed'));
       }
 
       const data = await res.json();
@@ -287,16 +336,40 @@ export default function Home() {
       });
       await fetchDocuments(token);
     } catch (err) {
-      setUploadError(
-        err.message === 'Failed to fetch'
-          ? `Cannot reach backend at ${API_BASE}.`
-          : err.message || 'Upload failed.'
-      );
+      setUploadError(networkMessage(err, 'Upload failed.'));
     } finally {
       setUploading(false);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+    }
+  }
+
+  async function handleDeleteDocument(filename) {
+    if (!token || deletingFile) return;
+    if (!window.confirm(`Delete "${filename}" from the index?`)) return;
+
+    setDeletingFile(filename);
+    setUploadError('');
+    try {
+      const res = await fetch(`${API_BASE}/documents/${encodeURIComponent(filename)}`, {
+        method: 'DELETE',
+        headers: buildAuthHeaders(token),
+      });
+      if (res.status === 401) {
+        handleExpiredSession();
+        return;
+      }
+      // 404 = already gone (e.g. deleted in another tab): just refresh the list.
+      if (!res.ok && res.status !== 404) {
+        throw new Error(await describeHttpError(res, 'Delete failed'));
+      }
+      if (uploadSuccess?.filename === filename) setUploadSuccess(null);
+      await fetchDocuments(token);
+    } catch (err) {
+      setUploadError(networkMessage(err, 'Delete failed.'));
+    } finally {
+      setDeletingFile('');
     }
   }
 
@@ -316,16 +389,15 @@ export default function Home() {
         headers: buildAuthHeaders(token),
       });
       if (res.status === 401) {
-        handleLogout();
+        handleExpiredSession();
         return;
       }
       if (!res.ok) {
-        const msg = await readErrorMessage(res, 'Failed to clear session');
-        throw new Error(msg);
+        throw new Error(await describeHttpError(res, 'Failed to clear session'));
       }
     } catch (err) {
       setChatError(
-        err.message === 'Failed to fetch'
+        err.name === 'TypeError'
           ? `Local chat cleared, but backend at ${API_BASE} was unreachable.`
           : err.message
       );
@@ -368,14 +440,13 @@ export default function Home() {
       });
 
       if (res.status === 401) {
-        handleLogout();
+        handleExpiredSession();
         return;
       }
 
       // Check !res.ok before touching res.body / TextDecoder
       if (!res.ok) {
-        const errorMessage = await readErrorMessage(res, 'Chat request failed');
-        setChatError(errorMessage);
+        setChatError(await describeHttpError(res, 'Chat request failed'));
         setMessages((prev) => {
           const next = [...prev];
           if (
@@ -417,7 +488,14 @@ export default function Home() {
           receivedAnyEvent = true;
 
           if (event.type === 'error') {
-            throw new Error(event.detail || event.message || 'The AI service failed to answer.');
+            // The backend sends {"type":"error","detail":...,"status_code":...}
+            // when the LLM fails after the stream has started (HTTP is already 200).
+            throw new Error(
+              withStatusLabel(
+                event.status_code,
+                event.detail || event.message || 'The AI service failed to answer.'
+              )
+            );
           } else if (event.type === 'token') {
             setMessages((prev) => {
               const next = [...prev];
@@ -460,9 +538,10 @@ export default function Home() {
         );
       }
     } catch (err) {
+      // TypeError = network failure (backend down, or connection dropped mid-stream).
       const friendly =
-        err.message === 'Failed to fetch' || err.name === 'TypeError'
-          ? 'Stream failed or backend error (502/503). Check that FastAPI is running and GOOGLE_API_KEY is valid.'
+        err.name === 'TypeError'
+          ? `Lost connection to the backend at ${API_BASE} while streaming. Is FastAPI running?`
           : err.message || 'An error occurred while streaming the answer.';
       setChatError(friendly);
 
@@ -614,8 +693,20 @@ export default function Home() {
                   <span className="truncate font-medium text-zinc-200 mr-2" title={doc.filename}>
                     {doc.filename}
                   </span>
-                  <span className="shrink-0 text-[11px] text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-full">
-                    {doc.num_chunks} chunks
+                  <span className="shrink-0 flex items-center gap-1.5">
+                    <span className="text-[11px] text-zinc-400 bg-zinc-800 px-2 py-0.5 rounded-full">
+                      {doc.num_chunks} chunks
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteDocument(doc.filename)}
+                      disabled={Boolean(deletingFile) || uploading}
+                      aria-label={`Delete ${doc.filename}`}
+                      title="Delete document"
+                      className="text-[11px] px-2 py-0.5 rounded-md border border-zinc-700 text-zinc-400 hover:text-red-300 hover:border-red-800 transition disabled:opacity-40 cursor-pointer"
+                    >
+                      {deletingFile === doc.filename ? 'Deleting...' : 'Delete'}
+                    </button>
                   </span>
                 </li>
               ))}
@@ -631,7 +722,7 @@ export default function Home() {
             </span>
             <button
               type="button"
-              onClick={handleLogout}
+              onClick={() => handleLogout()}
               className="text-zinc-400 hover:text-white underline cursor-pointer shrink-0"
             >
               Sign out

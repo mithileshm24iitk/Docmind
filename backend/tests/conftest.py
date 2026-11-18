@@ -17,6 +17,9 @@ from app.main import app
 from app.rag import chain, memory, tracing
 from app.retrieval import bm25, vectorstore
 
+# Fake 48-char signing key for tests only (never a real secret).
+TEST_AUTH_SECRET = "test-auth-secret-not-real-0123456789abcdefghijkl"
+
 
 class FakeSupabaseTable:
     """In-memory stand-in for a Supabase PostgREST table query builder."""
@@ -177,10 +180,13 @@ def isolated_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(tracing, "DEFAULT_TRACE_PATH", tmp_path / "traces.jsonl")
     monkeypatch.setenv("GOOGLE_API_KEY", "")
     monkeypatch.setenv("LLM_MODEL", "gemini-3.8-flash")
+    # Pin it so a local backend/.env value cannot change test results.
+    monkeypatch.setenv("LLM_FALLBACK_MODELS", '["gemini-2.5-flash"]')
     monkeypatch.setenv("SUPABASE_URL", "")
     monkeypatch.setenv("SUPABASE_KEY", "")
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "")
+    monkeypatch.setenv("AUTH_SECRET", TEST_AUTH_SECRET)
 
     mock_sb = FakeSupabaseClient()
     monkeypatch.setattr(db, "get_supabase_client", lambda: mock_sb)

@@ -3,6 +3,9 @@
 from types import SimpleNamespace
 
 import httpx
+import jwt
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.api import auth
@@ -140,3 +143,37 @@ def test_protected_routes_succeed_with_valid_bearer_token_and_isolate_users(
     rows = fake_supabase.tables["chat_messages"]
     assert len(rows) == 2
     assert {row["user_id"] for row in rows} == {"user-alice", "user-bob"}
+
+
+def test_auth_secret_missing_or_short_fails_clearly(monkeypatch):
+    for bad in ["", "too-short"]:
+        monkeypatch.setenv("AUTH_SECRET", bad)
+        get_settings.cache_clear()
+        with pytest.raises(HTTPException) as info:
+            create_access_token({"id": "u1"})
+        assert info.value.status_code == 503
+        assert "AUTH_SECRET" in info.value.detail
+
+
+def test_auth_secret_has_no_fallback_to_other_secrets(monkeypatch):
+    long_value = "x" * 40
+    monkeypatch.setenv("AUTH_SECRET", "")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", long_value)
+    monkeypatch.setenv("SUPABASE_KEY", long_value)
+    get_settings.cache_clear()
+    with pytest.raises(HTTPException):
+        create_access_token({"id": "u1"})
+
+    # A valid-looking token signed with another secret is still rejected (503, not 200).
+    app.dependency_overrides.clear()
+    forged = jwt.encode({"sub": "u1"}, long_value, algorithm=auth.JWT_ALGORITHM)
+    r = client.get("/auth/verify", headers={"Authorization": f"Bearer {forged}"})
+    assert r.status_code == 503
+
+
+def test_token_signed_with_auth_secret_verifies(monkeypatch):
+    monkeypatch.setenv("AUTH_SECRET", "a" * 32)
+    get_settings.cache_clear()
+    token = create_access_token({"id": "u1", "email": "u1@example.com", "name": "U1"})
+    assert jwt.decode(token, "a" * 32, algorithms=[auth.JWT_ALGORITHM])["sub"] == "u1"
+    assert auth.verify_access_token(token)["id"] == "u1"

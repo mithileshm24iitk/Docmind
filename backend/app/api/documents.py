@@ -1,3 +1,4 @@
+import logging
 import tempfile
 from pathlib import Path
 from typing import Literal
@@ -9,7 +10,7 @@ from pydantic import BaseModel, Field
 from app.api.auth import get_current_user
 from app.config import get_settings
 from app.ingestion.chunking import chunk_documents
-from app.ingestion.loaders import LOADERS, load_document
+from app.ingestion.loaders import LOADERS, count_pages, load_document
 from app.retrieval import vectorstore
 from app.retrieval.bm25 import bm25_search
 from app.retrieval.hybrid import hybrid_search
@@ -21,7 +22,10 @@ router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
+logger = logging.getLogger(__name__)
+
 MAX_MB = 20
+MAX_PAGES = 300
 
 
 async def _read_and_load(file: UploadFile) -> tuple[str, list[Document]]:
@@ -40,7 +44,18 @@ async def _read_and_load(file: UploadFile) -> tuple[str, list[Document]]:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / filename
         path.write_bytes(data)
-        docs = load_document(path)
+        try:
+            pages = count_pages(path)
+            if pages > MAX_PAGES:
+                raise HTTPException(
+                    413, f"Document has {pages} pages; the limit is {MAX_PAGES} pages."
+                )
+            docs = load_document(path)
+        except HTTPException:
+            raise
+        except Exception as exc:  # corrupt or encrypted file: a clean 422, not a 500
+            logger.warning("Could not read upload: %s", type(exc).__name__)
+            raise HTTPException(422, "Could not read this file (corrupt or encrypted?)") from None
 
     if not docs:
         raise HTTPException(422, "No extractable text (scanned PDF?)")
@@ -74,13 +89,30 @@ async def upload_document(file: UploadFile = File(...)):
     filename, docs = await _read_and_load(file)
     settings = get_settings()
     chunks = chunk_documents(docs, settings.chunk_size, settings.chunk_overlap)
-    num_chunks = vectorstore.add_chunks(DEFAULT_COLLECTION, chunks)
+    try:
+        num_chunks = vectorstore.add_chunks(DEFAULT_COLLECTION, chunks)
+    except vectorstore.EmbeddingError as e:
+        raise HTTPException(e.status_code, e.message) from None
+    except Exception as exc:  # e.g. missing/invalid API key: never a 500 or a stack trace
+        logger.warning("Embedding failed: %s", type(exc).__name__)
+        raise HTTPException(
+            503, "Could not embed the document right now. Please try again later."
+        ) from None
     return {"filename": filename, "pages": len(docs), "num_chunks": num_chunks}
 
 
 @router.get("")
 def list_uploaded_documents():
     return {"documents": vectorstore.list_documents(DEFAULT_COLLECTION)}
+
+
+@router.delete("/{filename}")
+def delete_uploaded_document(filename: str):
+    """Remove one file's chunks from Chroma (BM25 rebuilds on the next search). 404 if unknown."""
+    deleted = vectorstore.delete_document(DEFAULT_COLLECTION, filename)
+    if deleted == 0:
+        raise HTTPException(404, f"Document not found: {filename}")
+    return {"filename": filename, "deleted_chunks": deleted}
 
 
 class SearchRequest(BaseModel):

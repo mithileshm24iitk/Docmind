@@ -5,7 +5,8 @@
     "expected_source": "Mithilesh_Mattapalli_sde (2).pdf",
     "expected_page": 1,
     "expected_keywords": ["Indian Institute of Technology Kanpur", "Materials Science", "8.2"],
-    "should_answer": true
+    "should_answer": true,
+    "category": "mixed"
   },
   {
     "id": "resume_02",
@@ -13,7 +14,8 @@
     "expected_source": "Mithilesh_Mattapalli_sde (2).pdf",
     "expected_page": 1,
     "expected_keywords": ["ResNet-Conformer", "Permutation Invariant Training", "spherical harmonics"],
-    "should_answer": true
+    "should_answer": true,
+    "category": "mixed"
   },
   {
     "id": "resume_03",
@@ -21,7 +23,8 @@
     "expected_source": "Mithilesh_Mattapalli_sde (2).pdf",
     "expected_page": 1,
     "expected_keywords": ["8.1x", "97.89%", "K-Means", "Huffman"],
-    "should_answer": true
+    "should_answer": true,
+    "category": "keyword"
   },
   {
     "id": "resume_04",
@@ -29,7 +32,8 @@
     "expected_source": "Mithilesh_Mattapalli_sde (2).pdf",
     "expected_page": 1,
     "expected_keywords": ["ChromaDB", "BM25", "FastAPI", "Next.js"],
-    "should_answer": true
+    "should_answer": true,
+    "category": "keyword"
   },
   {
     "id": "resume_05",
@@ -37,7 +41,8 @@
     "expected_source": "Mithilesh_Mattapalli_sde (2).pdf",
     "expected_page": 1,
     "expected_keywords": ["file locking", "CSV", "inheritance", "polymorphism"],
-    "should_answer": true
+    "should_answer": true,
+    "category": "mixed"
   },
   {
     "id": "resume_06",
@@ -45,7 +50,8 @@
     "expected_source": "Mithilesh_Mattapalli_sde (2).pdf",
     "expected_page": 1,
     "expected_keywords": ["top 50", "99.66", "Goldman Sachs"],
-    "should_answer": true
+    "should_answer": true,
+    "category": "keyword"
   },
   {
     "id": "physics_01",
@@ -53,7 +59,8 @@
     "expected_source": "David J. Griffiths Introduction To Electrodynamics Prentice Hall ( 1999).pdf",
     "expected_page": 1,
     "expected_keywords": ["5", "7 miles"],
-    "should_answer": true
+    "should_answer": true,
+    "category": "mixed"
   },
   {
     "id": "physics_02",
@@ -61,7 +68,8 @@
     "expected_source": "David J. Griffiths Introduction To Electrodynamics Prentice Hall ( 1999).pdf",
     "expected_page": 3,
     "expected_keywords": ["projection", "product"],
-    "should_answer": true
+    "should_answer": true,
+    "category": "semantic"
   },
   {
     "id": "physics_03",
@@ -69,7 +77,8 @@
     "expected_source": "David J. Griffiths Introduction To Electrodynamics Prentice Hall ( 1999).pdf",
     "expected_page": 4,
     "expected_keywords": ["area of the parallelogram", "not commutative"],
-    "should_answer": true
+    "should_answer": true,
+    "category": "semantic"
   },
   {
     "id": "physics_04",
@@ -77,7 +86,8 @@
     "expected_source": "David J. Griffiths Introduction To Electrodynamics Prentice Hall ( 1999).pdf",
     "expected_page": 7,
     "expected_keywords": ["volume", "parallelepiped"],
-    "should_answer": true
+    "should_answer": true,
+    "category": "semantic"
   },
   {
     "id": "physics_05",
@@ -85,7 +95,8 @@
     "expected_source": "David J. Griffiths Introduction To Electrodynamics Prentice Hall ( 1999).pdf",
     "expected_page": 11,
     "expected_keywords": ["transforms", "displacement", "pear", "banana"],
-    "should_answer": true
+    "should_answer": true,
+    "category": "mixed"
   },
   {
     "id": "physics_06",
@@ -93,7 +104,8 @@
     "expected_source": "David J. Griffiths Introduction To Electrodynamics Prentice Hall ( 1999).pdf",
     "expected_page": 12,
     "expected_keywords": ["rank 1", "rank 0", "tensor"],
-    "should_answer": true
+    "should_answer": true,
+    "category": "mixed"
   },
   {
     "id": "refusal_01",

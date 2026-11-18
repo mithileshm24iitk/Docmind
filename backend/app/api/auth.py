@@ -22,18 +22,28 @@ DEFAULT_REDIRECT_URI = "http://localhost:3000"
 
 JWT_ALGORITHM = "HS256"
 JWT_TTL_SECONDS = 60 * 60 * 24  # 24 hours
+AUTH_SECRET_MIN_LENGTH = 32  # HS256 keys should be at least 256 bits
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def _jwt_secret() -> str:
-    """Return the signing key for app JWTs, derived from configured secrets."""
-    settings = get_settings()
-    return (
-        settings.google_client_secret
-        or settings.supabase_key
-        or "documind-local-jwt-secret-key-32bytes"
-    )
+    """Return AUTH_SECRET, the only key used to sign and verify app JWTs.
+
+    There is deliberately no fallback (no default, no other secret), so a
+    misconfigured server refuses to issue or accept tokens instead of
+    silently using a guessable or shared key.
+    """
+    secret = get_settings().auth_secret
+    if len(secret) < AUTH_SECRET_MIN_LENGTH:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Auth is not configured: AUTH_SECRET must be set "
+                f"(at least {AUTH_SECRET_MIN_LENGTH} characters)."
+            ),
+        )
+    return secret
 
 
 def create_access_token(user: dict[str, str], ttl_seconds: int = JWT_TTL_SECONDS) -> str:

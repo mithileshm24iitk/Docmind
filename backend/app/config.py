@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     supabase_key: str = ""
     google_client_id: str = ""
     google_client_secret: str = ""
+    # Dedicated key for signing login JWTs (min 32 chars). No default on purpose.
+    auth_secret: str = ""
 
     # --- Deployment (phase 9) ---
     # Comma-separated list of browser origins allowed to call the API.

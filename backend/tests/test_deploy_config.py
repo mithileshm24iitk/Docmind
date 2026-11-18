@@ -96,3 +96,21 @@ def test_stream_response_disables_buffering(fake_embeddings, fake_llm):
     for name, value in SSE_HEADERS.items():
         assert r.headers[name] == value
     assert "content-encoding" not in r.headers  # no gzip on the stream
+
+
+def test_test_tools_are_not_in_the_docker_requirements():
+    """The image installs only requirements.txt, so pytest must live in requirements-dev.txt."""
+    runtime = (BACKEND_DIR / "requirements.txt").read_text().lower()
+    dev = (BACKEND_DIR / "requirements-dev.txt").read_text().lower()
+    assert "pytest" not in runtime
+    assert "-r requirements.txt" in dev and "pytest==" in dev
+
+
+def test_env_example_lists_every_setting():
+    """Every variable Settings reads must be named in backend/.env.example."""
+    import re
+
+    text = (BACKEND_DIR / ".env.example").read_text()
+    listed = set(re.findall(r"^#?\s*([A-Z][A-Z0-9_]*)=", text, flags=re.MULTILINE))
+    expected = {name.upper() for name in Settings.model_fields}
+    assert expected <= listed, expected - listed

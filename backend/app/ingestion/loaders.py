@@ -33,6 +33,13 @@ def load_txt(path: Path) -> list[Document]:
     return [Document(page_content=text, metadata={"source": path.name, "page": 1})]
 
 
+def count_pages(path: Path) -> int:
+    """Number of pages, read cheaply before extracting any text. DOCX/TXT count as 1."""
+    if path.suffix.lower() == ".pdf":
+        return len(PdfReader(str(path)).pages)
+    return 1
+
+
 LOADERS = {".pdf": load_pdf, ".docx": load_docx, ".txt": load_txt}
 
 

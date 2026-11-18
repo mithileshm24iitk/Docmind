@@ -1,4 +1,5 @@
-# Direct dependencies only, pinned to the versions in backend/.venv.
+# Runtime dependencies only (this is all the Docker image installs).
+# Pinned to the versions in backend/.venv. Test tools: requirements-dev.txt.
 fastapi==0.163.2
 uvicorn[standard]==0.54.0
 python-multipart==0.0.34
@@ -15,5 +16,3 @@ rank-bm25==0.2.2
 httpx==0.28.1
 supabase==2.34.1
 PyJWT==2.15.1
-# Test-only (small; kept here so one install command works locally).
-pytest==9.2.0
