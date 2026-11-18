@@ -31,3 +31,6 @@ __pycache__/
 .env
 node_modules/
 .next/
+
+# Local vector store data
+backend/data/
