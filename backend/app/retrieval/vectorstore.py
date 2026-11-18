@@ -9,6 +9,20 @@ from app.retrieval.embeddings import get_embeddings
 
 DEFAULT_COLLECTION = "default"
 
+# collection name -> number of writes (uploads/deletes) since the app started.
+# Other modules (e.g. the BM25 cache) compare this number to know if their
+# cached copy of the collection is stale.
+_versions: dict[str, int] = {}
+
+
+def collection_version(collection: str) -> int:
+    """Return a counter that increases every time the collection changes."""
+    return _versions.get(collection, 0)
+
+
+def _mark_changed(collection: str) -> None:
+    _versions[collection] = collection_version(collection) + 1
+
 
 def get_store(collection: str, embeddings: Embeddings | None = None) -> Chroma:
     """Open (or create) a collection stored on disk at CHROMA_DIR."""
@@ -48,6 +62,7 @@ def add_chunks(
     ]
     store = get_store(collection, embeddings)
     store.add_documents(docs, ids=[_chunk_id(d) for d in docs])
+    _mark_changed(collection)
     return len(docs)
 
 
@@ -62,6 +77,19 @@ def similarity_search(
 def delete_collection(collection: str, embeddings: Embeddings | None = None) -> None:
     """Delete a whole collection (all its chunks)."""
     get_store(collection, embeddings).delete_collection()
+    _mark_changed(collection)
+
+
+def get_all_chunks(
+    collection: str, embeddings: Embeddings | None = None
+) -> list[Document]:
+    """Read every stored chunk (text + metadata) back out of Chroma."""
+    store = get_store(collection, embeddings)
+    data = store.get(include=["documents", "metadatas"])
+    return [
+        Document(page_content=text, metadata=meta)
+        for text, meta in zip(data["documents"], data["metadatas"])
+    ]
 
 
 def list_documents(

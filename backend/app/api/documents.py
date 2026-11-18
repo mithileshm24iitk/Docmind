@@ -1,5 +1,6 @@
 import tempfile
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from langchain_core.documents import Document
@@ -9,6 +10,8 @@ from app.config import get_settings
 from app.ingestion.chunking import chunk_documents
 from app.ingestion.loaders import LOADERS, load_document
 from app.retrieval import vectorstore
+from app.retrieval.bm25 import bm25_search
+from app.retrieval.hybrid import hybrid_search
 from app.retrieval.vectorstore import DEFAULT_COLLECTION
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -78,16 +81,34 @@ def list_uploaded_documents():
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
     k: int = Field(4, ge=1, le=20)
+    mode: Literal["vector", "bm25", "hybrid"] = "hybrid"
 
 
 @router.post("/search")
 def search_documents(req: SearchRequest):
-    """Return top-k chunks. score = cosine distance (lower means more similar)."""
-    results = vectorstore.similarity_search(DEFAULT_COLLECTION, req.query, req.k)
-    return {
-        "query": req.query,
-        "results": [
+    """Return top-k chunks.
+
+    vector: score = cosine distance (lower means more similar).
+    bm25:   score = BM25 keyword score (higher is better).
+    hybrid: score = fused RRF score (higher is better), plus vector_rank/bm25_rank.
+    """
+    if req.mode == "hybrid":
+        results = hybrid_search(DEFAULT_COLLECTION, req.query, req.k)
+    elif req.mode == "bm25":
+        hits = bm25_search(DEFAULT_COLLECTION, req.query, req.k)
+        results = [
+            {
+                "text": doc.page_content,
+                "score": score,
+                "metadata": doc.metadata,
+                "bm25_rank": rank,
+            }
+            for rank, (doc, score) in enumerate(hits, start=1)
+        ]
+    else:
+        hits = vectorstore.similarity_search(DEFAULT_COLLECTION, req.query, req.k)
+        results = [
             {"text": doc.page_content, "score": score, "metadata": doc.metadata}
-            for doc, score in results
-        ],
-    }
+            for doc, score in hits
+        ]
+    return {"query": req.query, "mode": req.mode, "results": results}

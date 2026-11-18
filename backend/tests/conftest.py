@@ -7,7 +7,7 @@ import pytest
 from langchain_core.embeddings import Embeddings
 
 from app.config import get_settings
-from app.retrieval import vectorstore
+from app.retrieval import bm25, vectorstore
 
 
 class FakeEmbeddings(Embeddings):
@@ -37,12 +37,17 @@ class FakeEmbeddings(Embeddings):
 
 @pytest.fixture(autouse=True)
 def isolated_settings(tmp_path, monkeypatch):
-    """Point Chroma at a temp folder and blank the API key (env beats .env)."""
+    """Point Chroma at a temp folder and blank the API key (env beats .env).
+
+    Also empty the in-memory BM25 cache, since every test gets a fresh Chroma dir.
+    """
     monkeypatch.setenv("CHROMA_DIR", str(tmp_path / "chroma"))
     monkeypatch.setenv("GOOGLE_API_KEY", "")
     get_settings.cache_clear()
+    bm25.clear_cache()
     yield
     get_settings.cache_clear()
+    bm25.clear_cache()
 
 
 @pytest.fixture
