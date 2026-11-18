@@ -26,3 +26,8 @@ coverage/
 .idea/
 .DS_Store
 *.log
+.venv/
+__pycache__/
+.env
+node_modules/
+.next/
