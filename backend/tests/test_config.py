@@ -13,13 +13,20 @@ def test_defaults_without_env_file(monkeypatch):
 
 
 def test_rag_defaults(monkeypatch):
-    for name in ["LLM_MODEL", "LLM_TEMPERATURE", "TOP_K", "RELEVANCE_MAX_DISTANCE"]:
+    for name in [
+        "LLM_MODEL",
+        "LLM_TEMPERATURE",
+        "TOP_K",
+        "RELEVANCE_MAX_DISTANCE",
+        "MEMORY_MAX_TURNS",
+    ]:
         monkeypatch.delenv(name, raising=False)
     s = Settings(_env_file=None)
     assert s.llm_model == "gemini-3.8-flash"
     assert s.llm_temperature == 0.2
     assert s.top_k == 5
     assert s.relevance_max_distance == 0.6
+    assert s.memory_max_turns == 5
 
 
 def test_env_var_overrides(tmp_path, monkeypatch):

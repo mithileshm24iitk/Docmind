@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # similar). If even the closest chunk is farther than this, we skip the LLM.
     relevance_max_distance: float = 0.6
 
+    # --- Conversation memory (phase 5) ---
+    memory_max_turns: int = 5  # user/assistant message pairs kept per session
+
 
 @lru_cache
 def get_settings() -> Settings:

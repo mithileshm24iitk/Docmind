@@ -8,7 +8,7 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.messages import AIMessage
 
 from app.config import get_settings
-from app.rag import chain
+from app.rag import chain, memory
 from app.retrieval import bm25, vectorstore
 
 
@@ -47,9 +47,11 @@ def isolated_settings(tmp_path, monkeypatch):
     monkeypatch.setenv("GOOGLE_API_KEY", "")
     get_settings.cache_clear()
     bm25.clear_cache()
+    memory.get_memory_store().clear_all()
     yield
     get_settings.cache_clear()
     bm25.clear_cache()
+    memory.get_memory_store().clear_all()
 
 
 @pytest.fixture
@@ -68,21 +70,39 @@ class FakeLLM:
 
     def __init__(self, reply: str = "Plants use sunlight [notes.txt, p.1].") -> None:
         self.reply = reply
-        self.calls: list[list] = []  # the messages passed to each invoke()
+        self.replies: list[str] = []
+        self.calls: list[list] = []  # the messages passed to each invoke()/stream()
         self.error: Exception | None = None
 
     @property
     def call_count(self) -> int:
         return len(self.calls)
 
+    def _next_reply(self) -> str:
+        return self.replies.pop(0) if self.replies else self.reply
+
     def invoke(self, messages: list) -> AIMessage:
         self.calls.append(messages)
         if self.error is not None:
             raise self.error
         return AIMessage(
-            content=self.reply,
+            content=self._next_reply(),
             usage_metadata={"input_tokens": 120, "output_tokens": 15, "total_tokens": 135},
         )
+
+    def stream(self, messages: list):
+        self.calls.append(messages)
+        if self.error is not None:
+            raise self.error
+        words = self._next_reply().split(" ")
+        for i, word in enumerate(words):
+            piece = word if i == len(words) - 1 else word + " "
+            usage = (
+                {"input_tokens": 120, "output_tokens": 15, "total_tokens": 135}
+                if i == len(words) - 1
+                else None
+            )
+            yield AIMessage(content=piece, usage_metadata=usage)
 
 
 @pytest.fixture
