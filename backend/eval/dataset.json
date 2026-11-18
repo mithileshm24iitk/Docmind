@@ -1,0 +1,122 @@
+[
+  {
+    "id": "resume_01",
+    "question": "Which university and degree program is Mithilesh enrolled in, and what is his CPI?",
+    "expected_source": "Mithilesh_Mattapalli_sde (2).pdf",
+    "expected_page": 1,
+    "expected_keywords": ["Indian Institute of Technology Kanpur", "Materials Science", "8.2"],
+    "should_answer": true
+  },
+  {
+    "id": "resume_02",
+    "question": "What architecture and loss function did Mithilesh use for 3D Direction of Arrival estimation?",
+    "expected_source": "Mithilesh_Mattapalli_sde (2).pdf",
+    "expected_page": 1,
+    "expected_keywords": ["ResNet-Conformer", "Permutation Invariant Training", "spherical harmonics"],
+    "should_answer": true
+  },
+  {
+    "id": "resume_03",
+    "question": "How much model size reduction and accuracy were achieved in the Deep Neural Network Compression Pipeline project?",
+    "expected_source": "Mithilesh_Mattapalli_sde (2).pdf",
+    "expected_page": 1,
+    "expected_keywords": ["8.1x", "97.89%", "K-Means", "Huffman"],
+    "should_answer": true
+  },
+  {
+    "id": "resume_04",
+    "question": "What retrieval techniques and tech stack were used to build the DocuMind RAG assistant?",
+    "expected_source": "Mithilesh_Mattapalli_sde (2).pdf",
+    "expected_page": 1,
+    "expected_keywords": ["ChromaDB", "BM25", "FastAPI", "Next.js"],
+    "should_answer": true
+  },
+  {
+    "id": "resume_05",
+    "question": "How did the C++ Library Management System prevent data corruption when writing to CSV files?",
+    "expected_source": "Mithilesh_Mattapalli_sde (2).pdf",
+    "expected_page": 1,
+    "expected_keywords": ["file locking", "CSV", "inheritance", "polymorphism"],
+    "should_answer": true
+  },
+  {
+    "id": "resume_06",
+    "question": "What rank did Mithilesh achieve in the Goldman Sachs GS Quant Hackathon and what was his JEE Main percentile?",
+    "expected_source": "Mithilesh_Mattapalli_sde (2).pdf",
+    "expected_page": 1,
+    "expected_keywords": ["top 50", "99.66", "Goldman Sachs"],
+    "should_answer": true
+  },
+  {
+    "id": "physics_01",
+    "question": "If you walk 4 miles due north and then 3 miles due east, how far are you from where you set out?",
+    "expected_source": "David J. Griffiths Introduction To Electrodynamics Prentice Hall ( 1999).pdf",
+    "expected_page": 1,
+    "expected_keywords": ["5", "7 miles"],
+    "should_answer": true
+  },
+  {
+    "id": "physics_02",
+    "question": "What is the geometric interpretation of the dot product A . B of two vectors?",
+    "expected_source": "David J. Griffiths Introduction To Electrodynamics Prentice Hall ( 1999).pdf",
+    "expected_page": 3,
+    "expected_keywords": ["projection", "product"],
+    "should_answer": true
+  },
+  {
+    "id": "physics_03",
+    "question": "What is the geometric meaning of the magnitude of the cross product |A x B| and is the cross product commutative?",
+    "expected_source": "David J. Griffiths Introduction To Electrodynamics Prentice Hall ( 1999).pdf",
+    "expected_page": 4,
+    "expected_keywords": ["area of the parallelogram", "not commutative"],
+    "should_answer": true
+  },
+  {
+    "id": "physics_04",
+    "question": "Geometrically, what does the magnitude of the scalar triple product |A . (B x C)| represent?",
+    "expected_source": "David J. Griffiths Introduction To Electrodynamics Prentice Hall ( 1999).pdf",
+    "expected_page": 7,
+    "expected_keywords": ["volume", "parallelepiped"],
+    "should_answer": true
+  },
+  {
+    "id": "physics_05",
+    "question": "How is a vector formally defined in terms of coordinate transformations, and why doesn't a barrel of fruit qualify as a vector?",
+    "expected_source": "David J. Griffiths Introduction To Electrodynamics Prentice Hall ( 1999).pdf",
+    "expected_page": 11,
+    "expected_keywords": ["transforms", "displacement", "pear", "banana"],
+    "should_answer": true
+  },
+  {
+    "id": "physics_06",
+    "question": "In the tensor hierarchy, how many components does an nth-rank tensor have in three dimensions, and what ranks correspond to a vector and a scalar?",
+    "expected_source": "David J. Griffiths Introduction To Electrodynamics Prentice Hall ( 1999).pdf",
+    "expected_page": 12,
+    "expected_keywords": ["rank 1", "rank 0", "tensor"],
+    "should_answer": true
+  },
+  {
+    "id": "refusal_01",
+    "question": "What is the capital of Australia and what is its current population?",
+    "expected_source": "",
+    "expected_page": 0,
+    "expected_keywords": [],
+    "should_answer": false
+  },
+  {
+    "id": "refusal_02",
+    "question": "How does the Federal Reserve use interest rate hikes to control monetary inflation?",
+    "expected_source": "",
+    "expected_page": 0,
+    "expected_keywords": [],
+    "should_answer": false
+  },
+  {
+    "id": "refusal_03",
+    "question": "What are the ingredients and baking temperature for traditional French sourdough bread?",
+    "expected_source": "",
+    "expected_page": 0,
+    "expected_keywords": [],
+    "should_answer": false
+  }
+]

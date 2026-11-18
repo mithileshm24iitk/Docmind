@@ -1,0 +1,169 @@
+{
+  "metrics": {
+    "k": 5,
+    "retrieval_only": true,
+    "num_questions": 15,
+    "num_answerable": 12,
+    "num_refusal": 3,
+    "vector_recall_at_k": 1.0,
+    "bm25_recall_at_k": 1.0,
+    "hybrid_recall_at_k": 1.0,
+    "refusal_accuracy": null,
+    "retrieval_p50_ms": 569.66,
+    "retrieval_p95_ms": 644.42,
+    "generation_p50_ms": null,
+    "generation_p95_ms": null,
+    "total_input_tokens": null,
+    "total_output_tokens": null,
+    "estimated_cost_per_1k_usd": null
+  },
+  "questions": [
+    {
+      "id": "resume_01",
+      "question": "Which university and degree program is Mithilesh enrolled in, and what is his CPI?",
+      "should_answer": true,
+      "vector_hit": true,
+      "bm25_hit": true,
+      "hybrid_hit": true,
+      "vector_ms": 2395.37,
+      "bm25_ms": 12.81,
+      "hybrid_ms": 566.86
+    },
+    {
+      "id": "resume_02",
+      "question": "What architecture and loss function did Mithilesh use for 3D Direction of Arrival estimation?",
+      "should_answer": true,
+      "vector_hit": true,
+      "bm25_hit": true,
+      "hybrid_hit": true,
+      "vector_ms": 609.47,
+      "bm25_ms": 1.27,
+      "hybrid_ms": 627.32
+    },
+    {
+      "id": "resume_03",
+      "question": "How much model size reduction and accuracy were achieved in the Deep Neural Network Compression Pipeline project?",
+      "should_answer": true,
+      "vector_hit": true,
+      "bm25_hit": true,
+      "hybrid_hit": true,
+      "vector_ms": 550.36,
+      "bm25_ms": 1.11,
+      "hybrid_ms": 657.24
+    },
+    {
+      "id": "resume_04",
+      "question": "What retrieval techniques and tech stack were used to build the DocuMind RAG assistant?",
+      "should_answer": true,
+      "vector_hit": true,
+      "bm25_hit": true,
+      "hybrid_hit": true,
+      "vector_ms": 599.39,
+      "bm25_ms": 1.28,
+      "hybrid_ms": 580.22
+    },
+    {
+      "id": "resume_05",
+      "question": "How did the C++ Library Management System prevent data corruption when writing to CSV files?",
+      "should_answer": true,
+      "vector_hit": true,
+      "bm25_hit": true,
+      "hybrid_hit": true,
+      "vector_ms": 680.95,
+      "bm25_ms": 1.16,
+      "hybrid_ms": 543.85
+    },
+    {
+      "id": "resume_06",
+      "question": "What rank did Mithilesh achieve in the Goldman Sachs GS Quant Hackathon and what was his JEE Main percentile?",
+      "should_answer": true,
+      "vector_hit": true,
+      "bm25_hit": true,
+      "hybrid_hit": true,
+      "vector_ms": 613.24,
+      "bm25_ms": 1.22,
+      "hybrid_ms": 572.47
+    },
+    {
+      "id": "physics_01",
+      "question": "If you walk 4 miles due north and then 3 miles due east, how far are you from where you set out?",
+      "should_answer": true,
+      "vector_hit": true,
+      "bm25_hit": true,
+      "hybrid_hit": true,
+      "vector_ms": 544.1,
+      "bm25_ms": 1.71,
+      "hybrid_ms": 545.25
+    },
+    {
+      "id": "physics_02",
+      "question": "What is the geometric interpretation of the dot product A . B of two vectors?",
+      "should_answer": true,
+      "vector_hit": true,
+      "bm25_hit": true,
+      "hybrid_hit": true,
+      "vector_ms": 625.02,
+      "bm25_ms": 0.79,
+      "hybrid_ms": 552.44
+    },
+    {
+      "id": "physics_03",
+      "question": "What is the geometric meaning of the magnitude of the cross product |A x B| and is the cross product commutative?",
+      "should_answer": true,
+      "vector_hit": true,
+      "bm25_hit": true,
+      "hybrid_hit": true,
+      "vector_ms": 598.86,
+      "bm25_ms": 1.48,
+      "hybrid_ms": 633.94
+    },
+    {
+      "id": "physics_04",
+      "question": "Geometrically, what does the magnitude of the scalar triple product |A . (B x C)| represent?",
+      "should_answer": true,
+      "vector_hit": true,
+      "bm25_hit": true,
+      "hybrid_hit": true,
+      "vector_ms": 553.58,
+      "bm25_ms": 1.5,
+      "hybrid_ms": 544.77
+    },
+    {
+      "id": "physics_05",
+      "question": "How is a vector formally defined in terms of coordinate transformations, and why doesn't a barrel of fruit qualify as a vector?",
+      "should_answer": true,
+      "vector_hit": true,
+      "bm25_hit": true,
+      "hybrid_hit": true,
+      "vector_ms": 550.15,
+      "bm25_ms": 1.36,
+      "hybrid_ms": 547.24
+    },
+    {
+      "id": "physics_06",
+      "question": "In the tensor hierarchy, how many components does an nth-rank tensor have in three dimensions, and what ranks correspond to a vector and a scalar?",
+      "should_answer": true,
+      "vector_hit": true,
+      "bm25_hit": true,
+      "hybrid_hit": true,
+      "vector_ms": 588.45,
+      "bm25_ms": 1.34,
+      "hybrid_ms": 581.12
+    },
+    {
+      "id": "refusal_01",
+      "question": "What is the capital of Australia and what is its current population?",
+      "should_answer": false
+    },
+    {
+      "id": "refusal_02",
+      "question": "How does the Federal Reserve use interest rate hikes to control monetary inflation?",
+      "should_answer": false
+    },
+    {
+      "id": "refusal_03",
+      "question": "What are the ingredients and baking temperature for traditional French sourdough bread?",
+      "should_answer": false
+    }
+  ]
+}

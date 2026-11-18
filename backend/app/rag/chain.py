@@ -32,6 +32,7 @@ from app.rag.prompts import (
     build_condense_prompt,
     build_generation_prompt,
 )
+from app.rag.tracing import log_trace
 from app.retrieval import vectorstore
 from app.retrieval.hybrid import hybrid_search
 from app.retrieval.vectorstore import DEFAULT_COLLECTION
@@ -314,6 +315,19 @@ def answer(
         if session_id:
             store.add_turn(session_id, question, NOT_FOUND_ANSWER)
         logger.info("RAG gate blocked: best_distance=%s stats=%s", distance, stats)
+        log_trace(
+            session_id=session_id,
+            question=question,
+            rewritten_question=search_query,
+            grounded=False,
+            best_distance=distance,
+            retrieval_ms=stats["retrieval_ms"],
+            generation_ms=stats["generation_ms"],
+            input_tokens=stats["input_tokens"],
+            output_tokens=stats["output_tokens"],
+            model=settings.llm_model,
+            num_sources=0,
+        )
         return {
             "answer": NOT_FOUND_ANSWER,
             "sources": [],
@@ -332,10 +346,24 @@ def answer(
     if session_id:
         store.add_turn(session_id, question, text)
 
+    sources = to_sources(chunks)
     logger.info("RAG answered: best_distance=%.3f stats=%s", distance, stats)
+    log_trace(
+        session_id=session_id,
+        question=question,
+        rewritten_question=search_query,
+        grounded=True,
+        best_distance=distance,
+        retrieval_ms=stats["retrieval_ms"],
+        generation_ms=stats["generation_ms"],
+        input_tokens=stats["input_tokens"],
+        output_tokens=stats["output_tokens"],
+        model=settings.llm_model,
+        num_sources=len(sources),
+    )
     return {
         "answer": text,
-        "sources": to_sources(chunks),
+        "sources": sources,
         "best_distance": distance,
         "grounded": True,
         "stats": stats,
@@ -374,6 +402,19 @@ def stream_answer(
             if session_id:
                 store.add_turn(session_id, question, NOT_FOUND_ANSWER)
             logger.info("RAG stream gate blocked: best_distance=%s stats=%s", distance, stats)
+            log_trace(
+                session_id=session_id,
+                question=question,
+                rewritten_question=rewritten,
+                grounded=False,
+                best_distance=distance,
+                retrieval_ms=stats["retrieval_ms"],
+                generation_ms=stats["generation_ms"],
+                input_tokens=stats["input_tokens"],
+                output_tokens=stats["output_tokens"],
+                model=settings.llm_model,
+                num_sources=0,
+            )
             yield _sse({"type": "token", "content": NOT_FOUND_ANSWER})
             yield _sse(
                 {
@@ -405,11 +446,25 @@ def stream_answer(
         if session_id:
             store.add_turn(session_id, question, full_answer)
 
+        sources = to_sources(chunks)
         logger.info("RAG stream answered: best_distance=%.3f stats=%s", distance, stats)
+        log_trace(
+            session_id=session_id,
+            question=question,
+            rewritten_question=rewritten,
+            grounded=True,
+            best_distance=distance,
+            retrieval_ms=stats["retrieval_ms"],
+            generation_ms=stats["generation_ms"],
+            input_tokens=stats["input_tokens"],
+            output_tokens=stats["output_tokens"],
+            model=settings.llm_model,
+            num_sources=len(sources),
+        )
         yield _sse(
             {
                 "type": "done",
-                "sources": to_sources(chunks),
+                "sources": sources,
                 "best_distance": distance,
                 "grounded": True,
                 "rewritten_question": rewritten,

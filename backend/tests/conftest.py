@@ -14,7 +14,7 @@ from app import db
 from app.api.auth import get_current_user
 from app.config import get_settings
 from app.main import app
-from app.rag import chain, memory
+from app.rag import chain, memory, tracing
 from app.retrieval import bm25, vectorstore
 
 
@@ -174,6 +174,7 @@ def fake_supabase() -> FakeSupabaseClient:
 def isolated_settings(tmp_path, monkeypatch):
     """Point Chroma at a temp folder, blank secrets, and mock Supabase offline."""
     monkeypatch.setenv("CHROMA_DIR", str(tmp_path / "chroma"))
+    monkeypatch.setattr(tracing, "DEFAULT_TRACE_PATH", tmp_path / "traces.jsonl")
     monkeypatch.setenv("GOOGLE_API_KEY", "")
     monkeypatch.setenv("LLM_MODEL", "gemini-3.8-flash")
     monkeypatch.setenv("SUPABASE_URL", "")
