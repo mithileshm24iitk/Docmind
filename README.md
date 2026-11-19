@@ -10,6 +10,10 @@ Rank Fusion), a relevance gate, conversation memory, streaming answers
 (Server-Sent Events), Google login with Supabase, document upload/delete, and
 an eval/tracing layer.
 
+> **Deployment status:** DocuMind is run locally (FastAPI on `http://localhost:8000`,
+> Next.js on `http://localhost:3000`). The `backend/Dockerfile` and Google Cloud Run
+> setup below are provided as ready-to-use configuration, but have **not** been deployed.
+
 ## Architecture
 
 ```text
@@ -19,7 +23,7 @@ an eval/tracing layer.
  Next.js frontend (my-app/)          login banner, upload, delete, chat UI
     │  fetch + SSE, "Authorization: Bearer <app JWT>"
     ▼
- FastAPI backend (backend/, Docker on Google Cloud Run)
+ FastAPI backend (backend/, local; Dockerfile + Cloud Run config not deployed)
     ├─ api/auth.py       Google OAuth code → user → app JWT (signed with AUTH_SECRET)
     ├─ api/documents.py  upload (20 MB / 300 pages), list, delete, search
     ├─ api/chat.py       /chat/ask (JSON), /chat/stream (SSE), clear session
@@ -135,10 +139,12 @@ Put the client ID in `GOOGLE_CLIENT_ID` and the client secret in
 `GOOGLE_CLIENT_SECRET`. If sign-in fails, the login screen shows the
 backend's error message in a red banner.
 
-## Docker
+## Docker (optional, not deployed)
 
-Build and run the backend image locally (env vars come from your `.env` at
-run time; the file itself is never copied into the image):
+The `backend/Dockerfile` is provided for containerizing the backend, though this
+project is currently run locally and has not been deployed. To build and run the
+backend image locally (env vars come from your `.env` at run time; the file
+itself is never copied into the image):
 
 ```bash
 cd backend
@@ -152,10 +158,12 @@ The image installs only `requirements.txt` and copies only `app/` (no `.env`,
 tests, eval or data). Cloud Run sets `PORT`; the container listens on
 `${PORT:-8080}`.
 
-## Deploy the backend to Cloud Run (Secret Manager)
+## Deploy the backend to Cloud Run (optional, not deployed)
 
-Secrets go in Secret Manager and are mounted as env vars. They never go in the
-image, the repo, or plain `--set-env-vars`. Replace the `<…>` values.
+These Cloud Run + Secret Manager steps are provided as reference configuration
+and have **not** been deployed. Secrets go in Secret Manager and are mounted as
+env vars. They never go in the image, the repo, or plain `--set-env-vars`.
+Replace the `<…>` values.
 
 ```bash
 PROJECT_ID=<your-project-id>
